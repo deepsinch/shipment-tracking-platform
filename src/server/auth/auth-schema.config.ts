@@ -1,15 +1,16 @@
 /**
  * Schema-generation config for the Better Auth CLI (`pnpm auth:generate`).
  *
- * It lists only the options that shape the database: email/password accounts and the organization
- * plugin. The CLI reads it to write `src/server/db/schema/auth.ts`, so the auth tables always match
- * the installed Better Auth version instead of being written by hand. Keep the plugin list in sync
- * with the runtime config in `src/server/auth/auth.ts`.
+ * It uses the same shared options and plugins as the runtime instance in `auth.ts`, minus the
+ * database adapter (so the CLI does not need a database). The CLI writes
+ * `src/server/db/schema/auth.ts` from it, so the auth tables always match the installed Better Auth
+ * version and the plugins the app really uses.
  */
 import { betterAuth } from "better-auth";
-import { organization } from "better-auth/plugins";
+
+import { organizationPlugin, sharedAuthOptions } from "./options";
 
 export const auth = betterAuth({
-  emailAndPassword: { enabled: true },
-  plugins: [organization()],
+  ...sharedAuthOptions,
+  plugins: [organizationPlugin],
 });
