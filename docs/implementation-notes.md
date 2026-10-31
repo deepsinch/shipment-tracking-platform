@@ -20,19 +20,21 @@ Phase 1 delivered, checkpoint by checkpoint:
    handling, public tracking page; Playwright e2e against a dedicated database; README.
 6. Demo seed (`pnpm db:seed`), sign-in/sign-up rate limiting, Phase 1 docs.
 
-**Phase 2 (live tracking) is in progress on branch `phase-2-live-tracking`.** Checkpoint 1 is
-reached: format:check, lint, typecheck, test (85 unit + 122 integration), build and test:e2e
-(6 specs) pass. **Next: checkpoint 2 (location pings).** The design is in `docs/architecture.md`,
+**Phase 2 (live tracking) is in progress on branch `phase-2-live-tracking`.** Checkpoint 2 is
+reached: format:check, lint, typecheck, test (99 unit + 162 integration), build and test:e2e
+(9 specs) pass. **Next: checkpoint 3 (realtime).** The design is in `docs/architecture.md`,
 "Phase 2: live tracking"; follow it. Checkpoints, each green and reviewed:
 
 1. **[done] Driver app and reassignment.** `/driver` (mobile-first, assigned shipments, big-button status
    flow via `statusOptionsFor`), role-based landing after sign-in, `assignDriver` service with a
    `driver_assigned` event, and the public timeline restricted to customer-facing event types by an
    allow-list (with a test). E2E: a driver signs in, lands on `/driver`, advances a shipment.
-2. **Location pings.** `location_pings` + `shipment_positions` (migration with composite FKs and
-   CHECKs), `recordLocationPing` (driver-only, assigned-only, active statuses, 10 s throttle,
-   future-time rejection, stale pings don't move the position), a positions snapshot service
-   (org-scoped), and the driver app sending pings via the Geolocation API while a shipment is active.
+2. **[done] Location pings.** `location_pings` + `shipment_positions` (migration 0005 with
+   composite FKs and CHECKs), `recordLocationPing` (driver-only, assigned-only, on-the-road
+   statuses, 10 s throttle, future-time rejection, late pings don't move the position),
+   `getShipmentPositions` (snapshot for the map), and "Share my location" in the driver app. Also
+   in this checkpoint: a confirm step before delivered/cancelled in both surfaces, and seed
+   deadlines that are mostly on time.
 3. **Realtime.** `RealtimeBus` with the Postgres `LISTEN`/`pg_notify` implementation on
    `DATABASE_DIRECT_URL`, `pg_notify` inside status, assignment and ping transactions, an SSE route
    handler with auth and org/driver filtering, self-closing before the function time limit, and
@@ -46,7 +48,7 @@ reached: format:check, lint, typecheck, test (85 unit + 122 integration), build 
 
 ## Roadmap
 
-- **Phase 2 (next):** driver app, location pings, live map (MapLibre + OpenStreetMap), realtime
+- **Phase 2 (in progress):** driver app, location pings, live map (MapLibre + OpenStreetMap), realtime
   via SSE, truck simulator. Checkpoints above.
 - **Phase 3:** public API with API keys, signed and retried webhooks, email notifications via Resend,
   proof of delivery (photo + signature), AI intake of shipment request emails.
@@ -308,6 +310,82 @@ drizzle-orm 0.45.4, drizzle-kit 0.31.11, pg 8.23, zod 4.6.7, @playwright/test 1.
   grid row 1 and left a gap above History; `lg:grid-rows-[auto_1fr]` fixed it. On the driver app,
   shipments past their promised time now read "Overdue" in red (words and colour).
 
+### Location pings, confirm step, seed (Phase 2, checkpoint 2)
+
+- **Throttle = one conditional upsert.** `recordLocationPing` runs
+  `INSERT INTO shipment_positions ... ON CONFLICT (shipment_id) DO UPDATE ... WHERE updated_at <=
+now - 10 s RETURNING`; no row back means throttled, and only then is the ping inserted (same
+  transaction). `shipment_positions.updated_at` is therefore "server time of the last accepted
+  ping", and it moves even for a late ping that leaves the position alone. Concurrent upserts of
+  one row serialize on the row (or on the speculative insert for a brand-new row), and Postgres
+  re-evaluates the WHERE against the committed row, so two parallel pings can never both win.
+  Decision 20 in the architecture doc.
+- **Gotcha: a burst test does not prove race safety.** Five parallel pings on a fresh shipment pass
+  even with a naive read-then-write throttle, because each transaction commits before the next one
+  reads. The deterministic test holds the position row `FOR UPDATE` in a third transaction until
+  both pings are blocked on it (same technique as the status concurrency test); that one goes red
+  with read-then-write (verified).
+- **Late pings:** `CASE WHEN excluded.recorded_at >= shipment_positions.recorded_at` per column, so
+  the newest device time wins (ties go to the later arrival) and `positionMoved` is simply
+  "returned `recorded_at` equals the ping's".
+- **`FOR SHARE` on the shipment row** while a ping is stored: a concurrent status change waits for
+  the ping to commit, so a ping can never land after the shipment was delivered. Pings do not
+  block each other on it.
+- **The server clock is injectable** (`deps.now`), like `createShipment`, so tests step past the
+  throttle window without sleeping. `received_at` and `updated_at` come from it, not `now()`.
+- **`location_pings` rejects UPDATE but allows DELETE/TRUNCATE** (trigger in 0005): pings are
+  telemetry with a 30-day retention, so the purge must be able to delete; a recorded fix is never
+  corrected. Retention itself is Phase 4.
+- **Gotcha: `z.coerce.number()` turns `null` into 0** (a valid latitude). Ping coordinates use
+  plain `z.number()`: pings come from code, not form strings. `recordedAt` accepts a `Date` or an
+  ISO string, and invalid dates fail.
+- **Snapshot includes `exception`.** `getShipmentPositions` returns every unfinished shipment with
+  a position (pings stop during an exception, but its last position is what dispatch wants then);
+  delivered and cancelled drop off. Built on `visibleShipments`, joined on `(id, organization_id)`.
+- **Pings go through a Server Action** (`src/app/driver/actions.ts`), not a route handler: only our
+  own component calls it, and it gets the session, Next's origin check and typed arguments for free.
+  The public API (Phase 3) would add a route handler over the same service.
+- **Client logic is framework-free** (`src/lib/location-sharer.ts`, unit tested with fake timers
+  and a fake Geolocation): sends the newest fix at most every 10 s, queues a fix that arrives
+  inside the window, retries a throttled fix once in the next window (found in the visual check:
+  with a fixed fake position, a throttled first ping left the status on "sending…"), stops for
+  permission denied and server stops, and keeps trying on unavailable/timeouts.
+- **Gotcha: Next hides, not unmounts, routes you leave** (Activity). Effects clean up, but state
+  survives. The component stops sharing and resets its switch in a `useLayoutEffect` cleanup (the
+  pattern in `node_modules/next/dist/docs/01-app/02-guides/preserving-ui-state.md`), so coming back
+  never resumes sharing without a new tap. The confirm dialog resets the same way.
+- **Accessible status:** the "Sharing location · last sent 12 s ago" line ticks every second, so it
+  is the switch's `aria-describedby`, not a live region; a separate `sr-only` `role="status"`
+  announces state changes only.
+- **Playwright geolocation:** `context.grantPermissions(["geolocation"])` plus
+  `context.setGeolocation(...)`. There is no position UI until the map, so the spec reads the
+  stored row with `tests/e2e/read-position.ts` (read-only, refuses non-`_e2e` databases).
+- **Confirm step** (`src/components/terminal-status-confirmation.tsx`): the form's `onSubmit` reads
+  the status being submitted (`new FormData(form, submitter)`), and for a terminal one calls
+  `preventDefault()`, which also stops React's form action (checked in react-dom: the action only
+  runs when the submit event was not default-prevented), and opens a Radix alert dialog. The
+  confirm button is portalled outside the form, so it uses the `form` attribute and a
+  `data-confirmed` marker the guard lets through; in the driver app it also carries
+  `name="toStatus"`. UI-only by design (a slip guard, not a trust boundary); without JavaScript the
+  form submits directly.
+- **Gotcha: `shadcn add alert-dialog` asks to overwrite `button.tsx`** and hangs without a TTY.
+  Answer no: `yes n | pnpm dlx shadcn@4.23.0 add alert-dialog` (with the NO_PROXY workaround).
+- **Seed deadlines:** unfinished shipments are promised relative to the seed's `now` (17:00 UTC,
+  at least 2 h ahead, plus the service level's days), except `OVERDUE_SHIPMENTS` (indices 12 and
+  26, both the demo driver's), due 2-3 hours ago. Finished shipments keep the booking-relative
+  promise. The smoke test pins "exactly 2 overdue" (the old logic gave 8).
+- **Proven-red checks (checkpoint 2):** in `recordLocationPing`, removing the throttle `WHERE`
+  (3 red), a read-then-write throttle (1 red: the forced race), removing `visibleShipments` (2 red),
+  the role check (2 red), the status rule (4 red), the late-ping `CASE` (1 red). In
+  `getShipmentPositions`, removing `visibleShipments` (3 red), keeping only the org filter (1 red:
+  driver scope), removing the terminal filter (1 red). Disabling the `location_pings` UPDATE
+  trigger (1 red); removing the confirm guard (both confirmation e2e specs red); the old seed
+  deadline logic (1 red). All restored.
+- **Visual check** (Playwright, 390 px and 1280 px): driver Location card off and sharing, the
+  driver's delivery confirmation, the dashboard's cancellation confirmation. Fixes from it: the
+  throttled-fix retry above, and the unchecked switch (light grey on white, below 3:1 contrast) now
+  uses `muted-foreground/80`.
+
 ### Testing
 
 - `pnpm test` runs two Vitest projects: `unit` (`src/**/*.test.ts`) and `integration`
@@ -347,10 +425,11 @@ drizzle-orm 0.45.4, drizzle-kit 0.31.11, pg 8.23, zod 4.6.7, @playwright/test 1.
   product choice; revisit with email verification in Phase 3 ("check your email" response).
 - An org-less user (see sign-up above) is sent to `/sign-in` while still signed in, which is
   confusing. A dedicated "no organization" page would be clearer.
-- **Driver buttons have no confirmation (fix in Phase 2 checkpoint 2).** "Mark as delivered" is
-  terminal and one tap away on a phone, and nobody can undo it. Architect decision: terminal
-  statuses (delivered, cancelled) get a confirm step in both surfaces until proof of delivery
-  (Phase 3) replaces it for delivery.
+- **The confirm step for delivered/cancelled is client-side only** (fixed in checkpoint 2, see the
+  checkpoint 2 notes). Without JavaScript the form submits directly; proof of delivery (Phase 3)
+  replaces the step for deliveries.
+- **Location pings are never purged yet.** The 30-day retention job is Phase 4; it will want an
+  index on `location_pings (received_at)` (or a time-partitioned table at scale).
 - **Drivers see internal notes and other drivers' names in the history** (getShipment returns the
   organization's full history to any member who can see the shipment). Architect decision: keep.
   Internal means "inside the company", and office notes such as gate codes are for drivers. Revisit

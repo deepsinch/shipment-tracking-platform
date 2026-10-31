@@ -79,6 +79,8 @@ ISO-2 country codes, status changes with a target status) complement Zod validat
 across every status. It uses only the application's own paths: Better Auth for accounts,
 `createShipment` (with an injectable clock to backdate bookings) and `changeShipmentStatus` for
 history, so seeded timelines obey the same state machine, role and ordering rules as real ones.
+Unfinished shipments are promised relative to the seed time, so all but two deliberately overdue
+ones are on time.
 History cannot be deleted, so a re-run is a no-op; `--reset` re-creates the local dev database.
 
 ## Shipment access
@@ -102,8 +104,8 @@ reveal. A driver can only be assigned if they are a `driver` member of the same 
 
 Use cases live in `src/server/services/`, one file per use case: `createShipment`, `listShipments`,
 `getShipment` (with actor and driver names), `changeShipmentStatus`, `getPublicTracking` and
-`listDrivers` (for assignment; admins and dispatchers only), plus from Phase 2 `assignDriver` and
-`listAssignedShipments` (the driver app's list). Each takes an `AuthContext` argument
+`listDrivers` (for assignment; admins and dispatchers only), plus from Phase 2 `assignDriver`,
+`listAssignedShipments` (the driver app's list), `recordLocationPing` and `getShipmentPositions`. Each takes an `AuthContext` argument
 (except the public lookup) instead of reading the session, so it runs in tests without Next.js.
 
 - **Expected outcomes are values.** Results are discriminated unions on `ok` and `reason`
@@ -254,6 +256,32 @@ Location pings are high-volume telemetry, not meaningful events, so they stay ou
   position do not move it.
 - Tenant consistency gets the same composite foreign key pattern as events.
 
+As implemented (checkpoint 2):
+
+- **Throttle as a conditional upsert.** `shipment_positions.updated_at` is the server time of the
+  last accepted ping. The upsert's `ON CONFLICT ... DO UPDATE ... WHERE updated_at <= now - 10 s`
+  is the only throttle check: Postgres serializes concurrent upserts of one row and re-evaluates
+  the condition against the committed row, so exactly one of several parallel pings is accepted.
+  Only when the upsert returns a row is the ping inserted, in the same transaction. A throttled
+  ping returns `{ ok: true, accepted: false, reason: "throttled" }` and writes nothing.
+- **Late pings** are stored and count for the throttle, but per-column `CASE` expressions keep the
+  position with the newest device time.
+- **Status races.** The shipment row is read `FOR SHARE`, so a status change waits for an in-flight
+  ping and a ping is never accepted after the shipment left the road.
+- **Mutability.** A trigger rejects `UPDATE` on `location_pings` (a recorded fix is never
+  corrected), but `DELETE` stays allowed for the retention purge, unlike `shipment_events`.
+- **Snapshot.** `getShipmentPositions(ctx, { shipmentIds? })` returns the latest position of every
+  unfinished shipment in the caller's scope (`visibleShipments`), including `exception`, where the
+  last known position matters most. Delivered and cancelled shipments drop off.
+- **Driver app.** "Share my location" appears only while the shipment is on the road and is off
+  until the driver switches it on. The client sends the newest `watchPosition` fix through a Server
+  Action at most every 10 s and stops on switch-off, on leaving the page, when the shipment leaves
+  the road (the control unmounts) and when the server answers that the shipment is inactive or no
+  longer theirs.
+- **Confirm step.** Delivered and cancelled ask for confirmation in an alert dialog in both
+  surfaces before the form submits. It guards against slips, not a trust boundary, so it is
+  client-side only.
+
 ### Public projection rules
 
 - Exact coordinates are never public. The tracking page shows city-level progress only.
@@ -307,24 +335,27 @@ messages as hints that data changed, not as the data itself:
 
 ## Decisions log
 
-| #   | Decision                                                                            | Why                                                                                                | Alternatives considered                                                                                                    |
-| --- | ----------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| 1   | Append-only events + status projection                                              | Audit trail and customer timeline from one source of truth                                         | Status column only (loses history)                                                                                         |
-| 2   | Optimistic concurrency via version column                                           | No locks held across user think-time, conflicts are explicit                                       | `SELECT ... FOR UPDATE` (fine inside one request, but does not catch stale forms)                                          |
-| 3   | State machine in pure TS                                                            | Unit testable, shared by UI (only show allowed buttons) and server (enforce)                       | DB check constraints (cannot express transitions cleanly)                                                                  |
-| 4   | Org from session, never from input                                                  | Prevents cross-tenant access by construction                                                       | Passing org id in URLs                                                                                                     |
-| 5   | Better Auth with organization plugin                                                | Orgs, members and roles out of the box, Drizzle adapter                                            | Auth.js (no built-in orgs), Clerk (hosted, vendor lock-in)                                                                 |
-| 6   | Integration tests against a real Postgres, re-migrated per run                      | Triggers, enums, FKs and transactions are what we need to prove; mocks or SQLite cannot run them   | Mocked DB layer, pg-mem, Testcontainers (no Docker here)                                                                   |
-| 7   | Tenant consistency enforced by a composite FK                                       | Makes a cross-org event impossible even with an application bug                                    | App-level checks only; a trigger                                                                                           |
-| 8   | Role read from the membership row per request                                       | Demotions and removals take effect immediately                                                     | Role cached in the session or a JWT (stale until expiry)                                                                   |
-| 9   | Driver scope as a shared `WHERE` helper, out-of-scope = not found                   | One place for tenant and role scoping; drivers cannot probe which shipments exist                  | Per-service checks after loading the row; `forbidden` for drivers                                                          |
-| 10  | Tracking code retry via `ON CONFLICT DO NOTHING` in the transaction                 | A unique violation would abort the transaction; this avoids savepoints and error-code parsing      | Catch `23505` and retry the whole transaction; savepoint per attempt                                                       |
-| 11  | Rate limits as fixed-window counters in Postgres                                    | Shared by every serverless instance; one atomic upsert per attempt; no new infrastructure          | In-memory (resets per instance and cold start), Redis/Upstash (extra service), sliding window (more state for little gain) |
-| 12  | Seed through the services, skip if present                                          | Seed data can never violate rules the app enforces, and the seed breaks loudly if the rules change | Raw SQL inserts (can drift from the rules), truncate and reseed (history cannot be deleted)                                |
-| 13  | Location pings in their own tables, not `shipment_events`                           | History stays meaningful; telemetry can be throttled, pruned and indexed for "latest position"     | Pings as events (floods history and the public timeline)                                                                   |
-| 14  | Latest position in `shipment_positions`, upserted with each ping                    | Maps read one row per shipment; status `version` is untouched by telemetry                         | Max-per-group query over pings; columns on `shipments` (would collide with optimistic concurrency)                         |
-| 15  | Realtime messages are invalidations; clients re-fetch on (re)connect                | Missed messages lose nothing; no event log or replay cursor to maintain                            | Replaying an event log with `Last-Event-ID`                                                                                |
-| 16  | `pg_notify` inside the write transaction, one `LISTEN` per instance, SSE to clients | Notifications only for committed writes; no new infrastructure; SSE matches one-way traffic        | WebSockets (two-way, harder on serverless); hosted pub/sub (extra service, kept possible via `RealtimeBus`); polling       |
-| 17  | OpenFreeMap tiles with MapLibre                                                     | Free, no API key, OSM data, allowed for app traffic                                                | `tile.openstreetmap.org` (usage policy), Mapbox/MapTiler (API keys, quotas)                                                |
-| 18  | Simulator routes from committed OSRM fixtures                                       | Real roads without a runtime dependency on a public routing server                                 | Live routing calls; straight-line interpolation only                                                                       |
-| 19  | Driver assignment bumps `version` and is refused once a shipment is finished        | A form rendered before a reassignment is stale like any other; a finished job keeps its record     | Separate assignment version (stale status forms would win); no version check (silent overwrite)                            |
+| #   | Decision                                                                            | Why                                                                                                                        | Alternatives considered                                                                                                        |
+| --- | ----------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| 1   | Append-only events + status projection                                              | Audit trail and customer timeline from one source of truth                                                                 | Status column only (loses history)                                                                                             |
+| 2   | Optimistic concurrency via version column                                           | No locks held across user think-time, conflicts are explicit                                                               | `SELECT ... FOR UPDATE` (fine inside one request, but does not catch stale forms)                                              |
+| 3   | State machine in pure TS                                                            | Unit testable, shared by UI (only show allowed buttons) and server (enforce)                                               | DB check constraints (cannot express transitions cleanly)                                                                      |
+| 4   | Org from session, never from input                                                  | Prevents cross-tenant access by construction                                                                               | Passing org id in URLs                                                                                                         |
+| 5   | Better Auth with organization plugin                                                | Orgs, members and roles out of the box, Drizzle adapter                                                                    | Auth.js (no built-in orgs), Clerk (hosted, vendor lock-in)                                                                     |
+| 6   | Integration tests against a real Postgres, re-migrated per run                      | Triggers, enums, FKs and transactions are what we need to prove; mocks or SQLite cannot run them                           | Mocked DB layer, pg-mem, Testcontainers (no Docker here)                                                                       |
+| 7   | Tenant consistency enforced by a composite FK                                       | Makes a cross-org event impossible even with an application bug                                                            | App-level checks only; a trigger                                                                                               |
+| 8   | Role read from the membership row per request                                       | Demotions and removals take effect immediately                                                                             | Role cached in the session or a JWT (stale until expiry)                                                                       |
+| 9   | Driver scope as a shared `WHERE` helper, out-of-scope = not found                   | One place for tenant and role scoping; drivers cannot probe which shipments exist                                          | Per-service checks after loading the row; `forbidden` for drivers                                                              |
+| 10  | Tracking code retry via `ON CONFLICT DO NOTHING` in the transaction                 | A unique violation would abort the transaction; this avoids savepoints and error-code parsing                              | Catch `23505` and retry the whole transaction; savepoint per attempt                                                           |
+| 11  | Rate limits as fixed-window counters in Postgres                                    | Shared by every serverless instance; one atomic upsert per attempt; no new infrastructure                                  | In-memory (resets per instance and cold start), Redis/Upstash (extra service), sliding window (more state for little gain)     |
+| 12  | Seed through the services, skip if present                                          | Seed data can never violate rules the app enforces, and the seed breaks loudly if the rules change                         | Raw SQL inserts (can drift from the rules), truncate and reseed (history cannot be deleted)                                    |
+| 13  | Location pings in their own tables, not `shipment_events`                           | History stays meaningful; telemetry can be throttled, pruned and indexed for "latest position"                             | Pings as events (floods history and the public timeline)                                                                       |
+| 14  | Latest position in `shipment_positions`, upserted with each ping                    | Maps read one row per shipment; status `version` is untouched by telemetry                                                 | Max-per-group query over pings; columns on `shipments` (would collide with optimistic concurrency)                             |
+| 15  | Realtime messages are invalidations; clients re-fetch on (re)connect                | Missed messages lose nothing; no event log or replay cursor to maintain                                                    | Replaying an event log with `Last-Event-ID`                                                                                    |
+| 16  | `pg_notify` inside the write transaction, one `LISTEN` per instance, SSE to clients | Notifications only for committed writes; no new infrastructure; SSE matches one-way traffic                                | WebSockets (two-way, harder on serverless); hosted pub/sub (extra service, kept possible via `RealtimeBus`); polling           |
+| 17  | OpenFreeMap tiles with MapLibre                                                     | Free, no API key, OSM data, allowed for app traffic                                                                        | `tile.openstreetmap.org` (usage policy), Mapbox/MapTiler (API keys, quotas)                                                    |
+| 18  | Simulator routes from committed OSRM fixtures                                       | Real roads without a runtime dependency on a public routing server                                                         | Live routing calls; straight-line interpolation only                                                                           |
+| 19  | Driver assignment bumps `version` and is refused once a shipment is finished        | A form rendered before a reassignment is stale like any other; a finished job keeps its record                             | Separate assignment version (stale status forms would win); no version check (silent overwrite)                                |
+| 20  | Ping throttle as a conditional upsert on `shipment_positions`                       | One statement is both the check and the write; Postgres re-checks it under the row lock, so parallel pings cannot both win | Read-then-write check (races); advisory lock per shipment (extra round trip, easy to forget); Redis rate limiter (new service) |
+| 21  | `location_pings` rejects UPDATE but allows DELETE                                   | Fixes are never corrected, but telemetry must be prunable (30-day retention)                                               | Full append-only trigger like events (blocks retention); no trigger (fixes could be edited)                                    |
+| 22  | Pings sent through a Server Action                                                  | Only our own client calls it; session, origin check and typed arguments come for free                                      | Route handler (needed later for a native app or the public API, over the same service)                                         |
