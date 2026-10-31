@@ -226,3 +226,27 @@ increments the count.
 **Known tradeoff.** Keying the account limit on email + IP means a botnet rotating IPs still gets a
 few guesses per IP. A per-email limit stops that but lets anyone lock a victim out of their account;
 the planned answer is a looser per-email cap plus breached-password checks.
+
+## Sending each role to its own home right after sign-in
+
+**Problem.** Drivers belong on `/driver` and staff on `/dashboard`, decided at the moment of
+sign-in. But sign-in runs in a Server Action, and the auth library sets the new session cookie on the
+response, so the usual "who is signed in?" helper (which reads the request) cannot see the session
+in that same request.
+
+**Options considered.**
+
+- Redirect everyone to `/dashboard` and let its guard bounce drivers: works, but an extra hop and a
+  flash of the wrong page.
+- A `/home` route that only redirects: the same extra hop, plus a route that exists for plumbing.
+- Replay the response's `Set-Cookie` into a second session lookup: fragile next to the library's own
+  cookie handling.
+- Re-derive the role from the user's oldest membership: duplicates the session hook's rule, which
+  could drift.
+- **Chosen:** read the session row the hook just wrote, by its token, and run the same
+  `resolveAuthContext` every request uses. Exact (the same organization and role the session will
+  have), one indexed query, covered by an integration test.
+
+**Related.** Wrong-surface visits (a driver opening `/dashboard`) redirect server-side inside the
+page's Suspense boundary. A role-aware `proxy.ts` would be faster, but it needs the role in the
+cookie, which conflicts with reading roles fresh on every request (decision 8).
