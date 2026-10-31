@@ -73,8 +73,11 @@ cancelled <────────────┘
 Every status change writes a row to `shipment_events`. The current status on `shipments` is a
 projection of the latest event, kept for fast queries. Both writes happen in one transaction.
 
-- A database trigger rejects `UPDATE` and `DELETE` on `shipment_events`, so history is tamper-evident
-  even if application code has a bug.
+- A database trigger rejects `UPDATE` and `DELETE` on `shipment_events` (and `TRUNCATE`, which
+  bypasses row-level triggers), so history is tamper-evident even if application code has a bug.
+- Foreign keys from `shipment_events` are `ON DELETE RESTRICT`: a cascade would itself be a
+  `DELETE`/`UPDATE` of history. Users, organizations and shipments with history are deactivated,
+  not hard-deleted.
 - `occurred_at` (when it happened in the real world, may be backdated by a driver who was offline)
   is separate from `recorded_at` (when the server stored it).
 
@@ -102,10 +105,11 @@ people who hold the code.
 
 ## Decisions log
 
-| #   | Decision                                  | Why                                                                          | Alternatives considered                                                           |
-| --- | ----------------------------------------- | ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| 1   | Append-only events + status projection    | Audit trail and customer timeline from one source of truth                   | Status column only (loses history)                                                |
-| 2   | Optimistic concurrency via version column | No locks held across user think-time, conflicts are explicit                 | `SELECT ... FOR UPDATE` (fine inside one request, but does not catch stale forms) |
-| 3   | State machine in pure TS                  | Unit testable, shared by UI (only show allowed buttons) and server (enforce) | DB check constraints (cannot express transitions cleanly)                         |
-| 4   | Org from session, never from input        | Prevents cross-tenant access by construction                                 | Passing org id in URLs                                                            |
-| 5   | Better Auth with organization plugin      | Orgs, members and roles out of the box, Drizzle adapter                      | Auth.js (no built-in orgs), Clerk (hosted, vendor lock-in)                        |
+| #   | Decision                                                       | Why                                                                                              | Alternatives considered                                                           |
+| --- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------- |
+| 1   | Append-only events + status projection                         | Audit trail and customer timeline from one source of truth                                       | Status column only (loses history)                                                |
+| 2   | Optimistic concurrency via version column                      | No locks held across user think-time, conflicts are explicit                                     | `SELECT ... FOR UPDATE` (fine inside one request, but does not catch stale forms) |
+| 3   | State machine in pure TS                                       | Unit testable, shared by UI (only show allowed buttons) and server (enforce)                     | DB check constraints (cannot express transitions cleanly)                         |
+| 4   | Org from session, never from input                             | Prevents cross-tenant access by construction                                                     | Passing org id in URLs                                                            |
+| 5   | Better Auth with organization plugin                           | Orgs, members and roles out of the box, Drizzle adapter                                          | Auth.js (no built-in orgs), Clerk (hosted, vendor lock-in)                        |
+| 6   | Integration tests against a real Postgres, re-migrated per run | Triggers, enums, FKs and transactions are what we need to prove; mocks or SQLite cannot run them | Mocked DB layer, pg-mem, Testcontainers (no Docker here)                          |
