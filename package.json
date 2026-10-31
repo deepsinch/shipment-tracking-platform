@@ -2,6 +2,7 @@
   "name": "waybill",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -11,7 +12,10 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "auth:generate": "pnpm dlx auth@1.7.14 generate --config src/server/auth/auth-schema.config.ts --adapter drizzle --dialect postgresql --output src/server/db/schema/auth.ts --yes && prettier --write src/server/db/schema/auth.ts"
   },
   "dependencies": {
     "better-auth": "^1.7.14",
