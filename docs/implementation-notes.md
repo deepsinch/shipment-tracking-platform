@@ -20,26 +20,27 @@ Phase 1 delivered, checkpoint by checkpoint:
    handling, public tracking page; Playwright e2e against a dedicated database; README.
 6. Demo seed (`pnpm db:seed`), sign-in/sign-up rate limiting, Phase 1 docs.
 
-**Next: Phase 2 (driver and live tracking).** Proposed checkpoints, each green and reviewed:
+**Next: Phase 2 (live tracking) on branch `phase-2-live-tracking`.** The design is in
+`docs/architecture.md`, "Phase 2: live tracking"; follow it. Checkpoints, each green and reviewed:
 
-1. **Driver app (`/driver`).** Mobile-first list of the driver's assigned shipments (reusing
-   `visibleShipments`) and a big-button status flow built on `statusOptionsFor("driver", ...)`;
-   role-based landing (drivers to `/driver`, staff to `/dashboard`). Dispatchers can reassign
-   drivers from the detail page (an `assignDriver` service with an event row).
-2. **Location pings.** `location_pings` table (org, shipment, driver, lat/lng, accuracy, recorded
-   and received times), a `recordLocationPing` service with Zod, driver-only and assigned-only,
-   throttled per driver; the driver app sends pings with the Geolocation API while a shipment is
-   active. Retention and indexing decided up front (latest ping per shipment is the hot query).
-3. **Live map.** MapLibre GL with OpenStreetMap tiles on the dashboard (all active shipments) and a
-   small map on the detail page; the public page shows city-level progress only (no exact
-   position), keeping the public projection rules.
-4. **Realtime via SSE.** A route handler streaming org-scoped events (status changes, pings) using
-   Postgres `LISTEN/NOTIFY`; the dashboard list, detail page and map update without reloads;
-   reconnect with `Last-Event-ID`. Check Vercel streaming limits and document the choice.
-5. **Truck simulator.** A script that drives seeded shipments along real routes (interpolated
-   between the seed's city coordinates), posting pings and status changes through the same
-   services, so the demo looks alive. Phase 2 e2e: a driver advances a shipment and the dashboard
-   updates live.
+1. **Driver app and reassignment.** `/driver` (mobile-first, assigned shipments, big-button status
+   flow via `statusOptionsFor`), role-based landing after sign-in, `assignDriver` service with a
+   `driver_assigned` event, and the public timeline restricted to customer-facing event types by an
+   allow-list (with a test). E2E: a driver signs in, lands on `/driver`, advances a shipment.
+2. **Location pings.** `location_pings` + `shipment_positions` (migration with composite FKs and
+   CHECKs), `recordLocationPing` (driver-only, assigned-only, active statuses, 10 s throttle,
+   future-time rejection, stale pings don't move the position), a positions snapshot service
+   (org-scoped), and the driver app sending pings via the Geolocation API while a shipment is active.
+3. **Realtime.** `RealtimeBus` with the Postgres `LISTEN`/`pg_notify` implementation on
+   `DATABASE_DIRECT_URL`, `pg_notify` inside status, assignment and ping transactions, an SSE route
+   handler with auth and org/driver filtering, self-closing before the function time limit, and
+   client hooks that `router.refresh()` or update positions. Integration tests: notifications only
+   on commit, cross-org isolation on the stream.
+4. **Live map.** MapLibre + OpenFreeMap, client-only; dashboard map of active shipments, detail-page
+   map with route and latest position; markers update from SSE. E2E with tile requests blocked.
+5. **Truck simulator.** OSRM route fixtures for the seed's city pairs (committed), a simulator
+   script driving active shipments through the services. Phase 2 e2e: a driver advances a shipment
+   and the dashboard updates without a reload.
 
 ## Roadmap
 
