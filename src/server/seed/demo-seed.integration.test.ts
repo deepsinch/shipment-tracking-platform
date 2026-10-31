@@ -1,7 +1,8 @@
 import { asc, eq, inArray } from "drizzle-orm";
 import { beforeAll, describe, expect, it } from "vitest";
 
-import { canTransition, SHIPMENT_STATUSES } from "@/domain/shipment-status";
+import { isOverdue } from "@/domain/driver-tasks";
+import { canTransition, isTerminalStatus, SHIPMENT_STATUSES } from "@/domain/shipment-status";
 import { getAuth } from "@/server/auth/auth";
 import { getDb } from "@/server/db/client";
 import { member, shipmentEvents, shipments, user } from "@/server/db/schema";
@@ -75,6 +76,30 @@ describe("seedDemo", () => {
       expect(shipment.version).toBe(history.length);
       expect(history.at(-1)!.occurredAt.getTime()).toBeLessThanOrEqual(now.getTime());
     }
+  });
+
+  it("keeps the demo believable: only a couple of unfinished shipments are overdue", async () => {
+    if (result.status !== "seeded") throw new Error("expected a fresh seed");
+    const seeded = await getDb()
+      .select({
+        status: shipments.status,
+        promisedDeliveryAt: shipments.promisedDeliveryAt,
+        assignedDriverId: shipments.assignedDriverId,
+      })
+      .from(shipments)
+      .where(eq(shipments.organizationId, result.organizationId));
+    const [driver] = await getDb()
+      .select({ id: user.id })
+      .from(user)
+      .where(eq(user.email, "driver@demo.test"));
+
+    const unfinished = seeded.filter((shipment) => !isTerminalStatus(shipment.status));
+    const overdue = unfinished.filter((shipment) => isOverdue(shipment, now));
+    expect(overdue).toHaveLength(2);
+    // Both on the demo driver's list, among more that are on time.
+    const driversActive = unfinished.filter((shipment) => shipment.assignedDriverId === driver!.id);
+    expect(overdue.every((shipment) => shipment.assignedDriverId === driver!.id)).toBe(true);
+    expect(driversActive.length).toBeGreaterThan(4);
   });
 
   it("is a no-op when run again", async () => {

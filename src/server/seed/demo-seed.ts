@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 
 import type { Role } from "@/domain/roles";
 import type { ServiceLevel } from "@/domain/service-level";
-import type { ShipmentStatus } from "@/domain/shipment-status";
+import { isTerminalStatus, type ShipmentStatus } from "@/domain/shipment-status";
 import type { AuthContext } from "@/server/auth/auth-context";
 import { getAuth } from "@/server/auth/auth";
 import { signUpWithOrganization } from "@/server/auth/sign-up";
@@ -275,6 +275,45 @@ async function createDemoAccounts(): Promise<Record<Role, AuthContext>> {
 
 const PROMISE_DAYS: Record<ServiceLevel, number> = { same_day: 0, express: 1, standard: 3 };
 
+/**
+ * The unfinished shipments that are deliberately late: one in transit and one held up by an
+ * exception, both the demo driver's. Everything else still on the road is on time, so the demo
+ * shows what "Overdue" looks like without looking broken.
+ */
+const OVERDUE_SHIPMENTS: ReadonlySet<number> = new Set([12, 26]);
+
+/**
+ * The promised delivery: 17:00 UTC, some days after booking by service level. Finished shipments
+ * keep that booking-relative promise. Unfinished ones are promised relative to `now` instead (so a
+ * fresh seed is on time however long ago its bookings are backdated), at least two hours ahead,
+ * except the deliberately overdue ones, which were due a couple of hours ago.
+ */
+function promisedDelivery({
+  finished,
+  overdue,
+  serviceLevel,
+  createdAt,
+  now,
+}: {
+  finished: boolean;
+  overdue: boolean;
+  serviceLevel: ServiceLevel;
+  createdAt: Date;
+  now: Date;
+}): Date {
+  if (overdue) {
+    const due = new Date(Math.floor((now.getTime() - 2 * HOUR) / HOUR) * HOUR);
+    if (due <= createdAt)
+      throw new Error("An overdue seed shipment must be booked before its due time");
+    return due;
+  }
+  const from = finished ? createdAt : new Date(now.getTime() + 2 * HOUR);
+  const promised = new Date(from.getTime() + PROMISE_DAYS[serviceLevel] * DAY);
+  promised.setUTCHours(17, 0, 0, 0);
+  if (promised <= from) promised.setTime(promised.getTime() + DAY);
+  return promised;
+}
+
 async function seedShipment(
   index: number,
   plan: readonly ShipmentStatus[],
@@ -294,9 +333,13 @@ async function seedShipment(
   const createdAt = roundToMinute(
     new Date(now.getTime() - historyLength - random.between(1, plan.length ? 30 : 72) * HOUR),
   );
-  const promised = new Date(createdAt.getTime() + PROMISE_DAYS[serviceLevel] * DAY);
-  promised.setUTCHours(17, 0, 0, 0);
-  if (promised <= createdAt) promised.setTime(promised.getTime() + DAY);
+  const promised = promisedDelivery({
+    finished: isTerminalStatus(plan.at(-1) ?? "created"),
+    overdue: OVERDUE_SHIPMENTS.has(index),
+    serviceLevel,
+    createdAt,
+    now,
+  });
 
   const created = await createShipment(
     contexts.dispatcher,
