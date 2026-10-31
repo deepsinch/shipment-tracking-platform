@@ -1,4 +1,6 @@
+import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { promisify } from "node:util";
 
 import { expect, type Page } from "@playwright/test";
 
@@ -9,15 +11,55 @@ import { expect, type Page } from "@playwright/test";
  * - Next's route announcer has role="alert"; form messages are found by test id instead.
  */
 
-/** Signs up a new user, who becomes the admin of a new company, and lands on the shipment list. */
-export async function signUp(page: Page, name = "Erin Dispatcher"): Promise<void> {
+const PASSWORD = "correct-horse-battery";
+
+/**
+ * Signs up a new user, who becomes the admin of a new company, and lands on the shipment list.
+ * Returns their email.
+ */
+export async function signUp(page: Page, name = "Erin Dispatcher"): Promise<string> {
+  const email = `e2e-${randomUUID()}@example.test`;
   await page.goto("/sign-up");
   await page.getByLabel("Your name", { exact: true }).fill(name);
-  await page.getByLabel("Email", { exact: true }).fill(`e2e-${randomUUID()}@example.test`);
-  await page.getByLabel("Password", { exact: true }).fill("correct-horse-battery");
+  await page.getByLabel("Email", { exact: true }).fill(email);
+  await page.getByLabel("Password", { exact: true }).fill(PASSWORD);
   await page.getByLabel("Company name", { exact: true }).fill("E2E Freight");
   await page.getByRole("button", { name: "Create account" }).click();
   await expect(page.getByRole("heading", { name: "Shipments", level: 1 })).toBeVisible();
+  return email;
+}
+
+/** Signs in with the shared e2e password; where the user lands depends on their role. */
+export async function signIn(page: Page, email: string): Promise<void> {
+  await page.goto("/sign-in");
+  await page.getByLabel("Email", { exact: true }).fill(email);
+  await page.getByLabel("Password", { exact: true }).fill(PASSWORD);
+  await page.getByRole("button", { name: "Sign in" }).click();
+}
+
+/**
+ * Adds a driver to the admin's company and returns their email. There is no member management UI
+ * yet, so this runs `add-driver.ts`, which uses Better Auth like the demo seed (no raw SQL). It
+ * runs as a separate process because server modules need the `react-server` condition.
+ */
+export async function addDriver(adminEmail: string, name: string): Promise<string> {
+  const email = `e2e-driver-${randomUUID()}@example.test`;
+  await promisify(execFile)(
+    "pnpm",
+    [
+      "exec",
+      "tsx",
+      "--conditions=react-server",
+      "tests/e2e/add-driver.ts",
+      adminEmail,
+      name,
+      email,
+      PASSWORD,
+    ],
+    // The same database the app under test uses (see playwright.config.ts).
+    { env: { ...process.env, DATABASE_URL: process.env.E2E_DATABASE_URL } },
+  );
+  return email;
 }
 
 /** Books a shipment from the list page and returns its tracking code (on its detail page). */

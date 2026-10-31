@@ -9,12 +9,14 @@ import { ShipmentHistory } from "@/components/shipment-history";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SERVICE_LEVEL_LABELS } from "@/domain/service-level";
-import { statusOptionsFor } from "@/domain/shipment-permissions";
+import { canAssignDrivers, canChangeDriver, statusOptionsFor } from "@/domain/shipment-permissions";
 import { formatDateTime, formatPlace, formatWeight } from "@/lib/format";
 import { requireAuthContextOn } from "@/server/auth/session";
 import type { Shipment } from "@/server/db/schema";
 import { getShipment } from "@/server/services/get-shipment";
+import { listDrivers } from "@/server/services/list-drivers";
 
+import { AssignDriverForm } from "./assign-driver-form";
 import { StatusChangeForm } from "./status-change-form";
 
 /** One lookup per request, shared by the metadata and the page. Not found ends both. */
@@ -35,6 +37,9 @@ export async function generateMetadata({
 export default async function ShipmentPage({ params }: PageProps<"/dashboard/shipments/[id]">) {
   const { ctx, shipment, assignedDriverName, events } = await loadShipment((await params).id);
   const options = statusOptionsFor(ctx.role, shipment.status);
+  // Only staff reach this page, but the role rule decides, not the route.
+  const driverList = canAssignDrivers(ctx.role) ? await listDrivers(ctx) : null;
+  const drivers = driverList?.ok ? driverList.drivers : null;
 
   return (
     <main className="flex flex-col gap-6">
@@ -66,7 +71,7 @@ export default async function ShipmentPage({ params }: PageProps<"/dashboard/shi
         )}
       </div>
 
-      {/* DOM order (details, status, history) is also the mobile order. */}
+      {/* DOM order (details, status, driver, history) is also the mobile order. */}
       {/* Row 1 sizes to the details; the taller side column grows into row 2, not row 1. */}
       <div className="grid items-start gap-6 lg:grid-cols-3 lg:grid-rows-[auto_1fr]">
         <ShipmentDetails
@@ -89,6 +94,30 @@ export default async function ShipmentPage({ params }: PageProps<"/dashboard/shi
                 status={shipment.status}
                 options={options}
               />
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle>
+                <h2>Driver</h2>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {drivers && canChangeDriver(shipment.status) ? (
+                <AssignDriverForm
+                  shipmentId={shipment.id}
+                  version={shipment.version}
+                  assignedDriverId={shipment.assignedDriverId}
+                  drivers={drivers}
+                />
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  {assignedDriverName ?? "No driver"}
+                  {canChangeDriver(shipment.status)
+                    ? "."
+                    : ". The driver of a finished shipment can no longer change."}
+                </p>
+              )}
             </CardContent>
           </Card>
         </div>
