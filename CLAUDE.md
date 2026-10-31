@@ -74,6 +74,7 @@ src/
 
 - Postgres 16 is installed but stopped: `service postgresql start`, then create the role and the
   `waybill` / `waybill_test` databases with the SQL in `.env.example`. Copy `.env.example` to `.env`.
+  `pnpm test` needs both: its integration project wipes and re-migrates the `*_test` database.
 - Playwright: use the preinstalled chromium at `/opt/pw-browsers/chromium`
   (via `launchOptions.executablePath`). Never run `playwright install`.
 - Docker is unavailable.

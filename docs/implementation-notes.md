@@ -11,8 +11,7 @@ Work proceeds in reviewable checkpoints: (1) scaffold + tooling, (2) DB, (3) aut
 (4) services + integration tests, (5) UI, (6) seed + e2e + README + docs. Finish one, get it green,
 commit, stop for architect review.
 
-**Checkpoint reached: 1 (scaffold + tooling).** lint, typecheck, test (51 domain tests under real
-Vitest) and build pass.
+**Checkpoint reached: 2 (DB).** lint, typecheck, test (51 unit + 5 integration) and build pass.
 
 Done:
 
@@ -27,11 +26,14 @@ Next (remaining Phase 1 scope, from the original brief):
       into a temp dir, then move the files in, keeping `.gitignore` entries, README and docs.
 - [x] Tooling: TypeScript strict, ESLint, Prettier, Vitest, scripts `dev`, `build`, `lint`, `typecheck`,
       `test`, `format`.
-- [ ] Remaining scripts: `db:generate`, `db:migrate` (checkpoint 2), `db:seed` (6), `test:e2e` with
-      Playwright `executablePath` (6; first e2e run from checkpoint 5).
-- [ ] Drizzle schema: Better Auth tables (user, session, account, verification, organization, member,
+- [x] DB scripts: `db:generate`, `db:migrate`, plus `auth:generate` (regenerates the Better Auth schema).
+- [ ] Remaining scripts: `db:seed` (checkpoint 6), `test:e2e` with Playwright `executablePath`
+      (first e2e run from checkpoint 5).
+- [x] Drizzle schema: Better Auth tables (user, session, account, verification, organization, member,
       invitation), `shipments`, `shipment_events`, indexes for org-scoped listing and status filtering.
-- [ ] Migration with a trigger that raises on UPDATE/DELETE of `shipment_events`. Migrations committed.
+- [x] Migration with a trigger that raises on UPDATE/DELETE (and TRUNCATE) of `shipment_events`.
+      Migrations committed in `src/server/db/migrations/`.
+- [x] Integration test project against `waybill_test`, with the append-only trigger tests.
 - [ ] Better Auth: email/password + organization plugin, roles admin/dispatcher/driver; sign-up creates
       a user plus a new org where they are admin; sign-in, sign-out; session helper returning
       `AuthContext` or redirecting; protection for `/dashboard`.
@@ -102,10 +104,47 @@ drizzle-orm 0.45.4, drizzle-kit 0.31.11, pg 8.23, zod 4.6.7, @playwright/test 1.
 - **Better Auth CLI** is the `auth` npm package (`pnpm dlx auth@<version> generate`), not
   `@better-auth/cli` (stale at 1.4.x).
 - **shadcn/ui registry** (`ui.shadcn.com`) is reachable from this environment.
+- **Better Auth schema is generated, never hand-edited.** `pnpm auth:generate` runs the CLI against
+  `src/server/auth/auth-schema.config.ts` (schema-relevant options only, no database adapter, so the
+  CLI does not have to load the DB client) with `--adapter drizzle --dialect postgresql`, then
+  Prettier. Re-running it on an unchanged config reproduces `src/server/db/schema/auth.ts` exactly.
+  If a plugin that adds tables is enabled (teams, dynamic access control), add it to that config,
+  regenerate, then `pnpm db:generate`.
+- **Better Auth uses `timestamp` without time zone** for its own tables. Left as generated; our tables
+  use `timestamptz` (`withTimezone: true`).
+- **drizzle-kit resolves the `@/` tsconfig alias** when loading the schema, so schema files can
+  import enum values from `src/domain`.
+- **Custom SQL migrations:** `pnpm db:generate --custom --name <name>` creates an empty, journaled
+  file. Separate statements with `--> statement-breakpoint`.
+- **Drizzle wraps driver errors.** The Postgres SQLSTATE is on `error.cause.code`, not `error.code`;
+  `pgErrorCode()` in `tests/integration/fixtures.ts` unwraps it.
+- **FK actions vs the append-only trigger.** Postgres runs FK `ON DELETE CASCADE` / `SET NULL` as
+  ordinary DELETE/UPDATE statements, which fire the trigger. So every FK on `shipment_events` (and
+  `shipments.organization_id`) is `restrict`: deleting a user/org/shipment that has history fails
+  cleanly with an FK error. Deactivate instead of deleting (Better Auth org deletion should be
+  disabled in checkpoint 3).
+- **`server-only` in tests and scripts.** Importing it outside a React Server Components bundle
+  throws. Vitest aliases it to `tests/server-only-stub.ts`; tsx scripts (seed) should run with
+  `--conditions=react-server` or avoid importing server-only modules.
+- **`"type": "module"`** is set in `package.json`, otherwise Vite warns that `vitest.config.ts` is
+  ESM loaded as CommonJS (and the Better Auth CLI warns the same about its config).
+
+### Testing
+
+- `pnpm test` runs two Vitest projects: `unit` (`src/**/*.test.ts`) and `integration`
+  (`src/**/*.integration.test.ts`).
+- Integration tests need **Postgres running** (`service postgresql start`) and **`.env` with
+  `TEST_DATABASE_URL`**. The global setup (`tests/integration/global-setup.ts`) drops and recreates
+  the `public` and `drizzle` schemas of that database, then applies every committed migration. It
+  refuses to run unless the database name ends in `_test`.
+- For code under test, `DATABASE_URL` is overridden to `TEST_DATABASE_URL`. Files run serially.
+- Tests never clean up: fixtures use random ids, so tests are isolated without deleting rows
+  (history rows cannot be deleted anyway).
 
 ## Known issues / TODOs
 
-- None open at checkpoint 1.
+- Better Auth org deletion and user deletion will fail with an FK error once history exists (by
+  design, see gotchas). Disable org deletion in the Better Auth config (checkpoint 3).
 
 ## Environment notes
 
