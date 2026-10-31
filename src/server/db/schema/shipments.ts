@@ -1,6 +1,8 @@
 import { sql } from "drizzle-orm";
 import {
+  check,
   doublePrecision,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -9,7 +11,9 @@ import {
   pgTable,
   text,
   timestamp,
+  unique,
   uuid,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 
 import { SERVICE_LEVELS } from "@/domain/service-level";
@@ -24,6 +28,12 @@ export const shipmentEventTypeEnum = pgEnum("shipment_event_type", SHIPMENT_EVEN
 
 /** All our own timestamps are timezone-aware and surface as JS Dates. */
 const timestamptz = (name: string) => timestamp(name, { withTimezone: true, mode: "date" });
+
+/** CHECK expressions for optional coordinates (null allowed, otherwise a valid range). */
+const latitudeInRange = (column: AnyPgColumn) =>
+  sql`${column} IS NULL OR ${column} BETWEEN -90 AND 90`;
+const longitudeInRange = (column: AnyPgColumn) =>
+  sql`${column} IS NULL OR ${column} BETWEEN -180 AND 180`;
 
 export const shipments = pgTable(
   "shipments",
@@ -87,6 +97,17 @@ export const shipments = pgTable(
     index("shipments_assigned_driver_idx")
       .on(table.assignedDriverId)
       .where(sql`${table.assignedDriverId} is not null`),
+    // Target of the composite FK from shipment_events, which pins each event to its shipment's org.
+    unique("shipments_id_organization_id_unique").on(table.id, table.organizationId),
+    // Last line of defence behind Zod validation.
+    check("shipments_weight_kg_positive", sql`${table.weightKg} > 0`),
+    check("shipments_version_positive", sql`${table.version} >= 1`),
+    check("shipments_origin_lat_range", latitudeInRange(table.originLat)),
+    check("shipments_origin_lng_range", longitudeInRange(table.originLng)),
+    check("shipments_destination_lat_range", latitudeInRange(table.destinationLat)),
+    check("shipments_destination_lng_range", longitudeInRange(table.destinationLng)),
+    check("shipments_origin_country_iso2", sql`${table.originCountry} ~ '^[A-Z]{2}$'`),
+    check("shipments_destination_country_iso2", sql`${table.destinationCountry} ~ '^[A-Z]{2}$'`),
   ],
 );
 
@@ -105,9 +126,8 @@ export const shipmentEvents = pgTable(
     organizationId: text("organization_id")
       .notNull()
       .references(() => organization.id, { onDelete: "restrict" }),
-    shipmentId: uuid("shipment_id")
-      .notNull()
-      .references(() => shipments.id, { onDelete: "restrict" }),
+    /** FK is composite with organization_id, see the table constraints below. */
+    shipmentId: uuid("shipment_id").notNull(),
     type: shipmentEventTypeEnum("type").notNull(),
     fromStatus: shipmentStatusEnum("from_status"),
     toStatus: shipmentStatusEnum("to_status"),
@@ -128,6 +148,18 @@ export const shipmentEvents = pgTable(
     // Timeline for one shipment, in real-world order.
     index("shipment_events_shipment_occurred_at_idx").on(table.shipmentId, table.occurredAt),
     index("shipment_events_org_recorded_at_idx").on(table.organizationId, table.recordedAt),
+    // An event must belong to the same organization as its shipment.
+    foreignKey({
+      name: "shipment_events_shipment_org_fk",
+      columns: [table.shipmentId, table.organizationId],
+      foreignColumns: [shipments.id, shipments.organizationId],
+    }).onDelete("restrict"),
+    check("shipment_events_location_lat_range", latitudeInRange(table.locationLat)),
+    check("shipment_events_location_lng_range", longitudeInRange(table.locationLng)),
+    check(
+      "shipment_events_status_change_has_target",
+      sql`${table.type} <> 'status_changed' OR ${table.toStatus} IS NOT NULL`,
+    ),
   ],
 );
 
