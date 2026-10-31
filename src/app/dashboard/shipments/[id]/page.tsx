@@ -12,8 +12,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SERVICE_LEVEL_LABELS } from "@/domain/service-level";
 import { canAssignDrivers, canChangeDriver, statusOptionsFor } from "@/domain/shipment-permissions";
 import { isTerminalStatus } from "@/domain/shipment-status";
-import { formatDateTime, formatPlace, formatWeight } from "@/lib/format";
+import { RouteMap } from "@/components/map/route-map";
+import type { Stop } from "@/components/map/route-map-canvas";
 import type { LivePosition } from "@/components/realtime/use-live-position";
+import { formatDateTime, formatPlace, formatWeight } from "@/lib/format";
+import { straightLineRoute } from "@/lib/geo";
 import { requireAuthContextOn, type AuthContext } from "@/server/auth/session";
 import type { Shipment } from "@/server/db/schema";
 import { getShipment } from "@/server/services/get-shipment";
@@ -191,6 +194,7 @@ function ShipmentDetails({
             country={shipment.destinationCountry}
           />
         </div>
+        <ShipmentRouteMap shipment={shipment} lastPosition={lastPosition} />
         <dl className="grid gap-x-6 gap-y-4 sm:grid-cols-2">
           <Detail label="Recipient">
             {shipment.recipientName}
@@ -213,6 +217,47 @@ function ShipmentDetails({
         </dl>
       </CardContent>
     </Card>
+  );
+}
+
+/** A stop for the map, when the shipment has its coordinates (they are optional at booking). */
+function stopOf(lat: number | null, lng: number | null, city: string): Stop | null {
+  return lat === null || lng === null ? null : { lat, lng, city };
+}
+
+/**
+ * Pickup, delivery, the route between them and the latest position. Shown when there is at least
+ * one point to draw; the addresses and "Last seen" stay as text either way.
+ */
+function ShipmentRouteMap({
+  shipment,
+  lastPosition,
+}: {
+  shipment: Shipment;
+  lastPosition: LivePosition | null | undefined;
+}) {
+  const origin = stopOf(shipment.originLat, shipment.originLng, shipment.originCity);
+  const destination = stopOf(
+    shipment.destinationLat,
+    shipment.destinationLng,
+    shipment.destinationCity,
+  );
+  // An active shipment is drawn even before its first ping: the marker appears with it.
+  if (!origin && !destination && lastPosition === undefined) return null;
+
+  return (
+    <RouteMap
+      shipment={{
+        shipmentId: shipment.id,
+        trackingCode: shipment.trackingCode,
+        status: shipment.status,
+        destinationCity: shipment.destinationCity,
+      }}
+      origin={origin}
+      destination={destination}
+      route={origin && destination ? straightLineRoute(origin, destination) : null}
+      initialPosition={lastPosition}
+    />
   );
 }
 
