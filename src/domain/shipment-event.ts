@@ -1,3 +1,5 @@
+import { shipmentStatusLabel, type ShipmentStatus } from "./shipment-status";
+
 /**
  * Kinds of rows in the append-only shipment history.
  *
@@ -9,3 +11,9 @@
 export const SHIPMENT_EVENT_TYPES = ["created", "status_changed"] as const;
 
 export type ShipmentEventType = (typeof SHIPMENT_EVENT_TYPES)[number];
+
+/** Headline for a history event: "Shipment created", or the status it entered. */
+export function shipmentEventTitle(type: ShipmentEventType, status: ShipmentStatus | null): string {
+  if (type === "created") return "Shipment created";
+  return status ? shipmentStatusLabel(status) : "Status changed";
+}
