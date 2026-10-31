@@ -37,6 +37,10 @@ src/
 - Validate with Zod at every trust boundary (forms, Server Actions, later the public API).
 - Status changes: state machine check + optimistic concurrency (`version`) + event insert in one transaction.
   `shipment_events` is append-only (DB trigger rejects UPDATE, DELETE and TRUNCATE).
+- Every shipment read or write builds on `visibleShipments(ctx)` (organization, plus "assigned to me"
+  for drivers). Never hand-write the scope in a query.
+- Anything public (tracking page, later the public API) selects an explicit column list, never a whole
+  row, and has a test asserting the exact set of returned keys.
 - Anything with history (users, organizations, shipments) is deactivated, never hard-deleted: foreign keys
   to history are `restrict`.
 - Database constraints (CHECKs, composite FKs) complement Zod validation; they never replace it.

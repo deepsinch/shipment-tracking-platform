@@ -135,3 +135,41 @@ reading the library source explained it. The code now confirms the user exists.
   failed organization step deletes the user again (compensation).
 - Better Auth's rate limiter does not cover server-side API calls, so sign-in needs its own limiter
   (tracked in implementation notes).
+
+## Proving optimistic concurrency actually works
+
+**Problem.** Two people change the same shipment at once. Status changes use optimistic concurrency:
+the update says `WHERE id = ? AND version = ?` and bumps the version, so the second writer matches no
+rows and gets a conflict with fresh data
+([`change-shipment-status.ts`](../src/server/services/change-shipment-status.ts)). The hard part is
+proving it. Firing two requests with `Promise.all` is a race: if one finishes before the other
+starts, an early "is your form stale?" check rejects the second, and the test passes even with the
+real guard deleted.
+
+**Options considered.**
+
+- `Promise.all`: flaky, and cannot tell which mechanism caught the conflict.
+- A test-only pause hook inside the service: leaks test code into production code.
+- `SERIALIZABLE` isolation with retries: changes the design under test.
+- Advisory locks: also need cooperation from the code under test.
+- **Chosen:** a third transaction locks the row with `SELECT ... FOR UPDATE`, the test waits until
+  `pg_stat_activity` shows both changes blocked on that lock, then releases it. Both have certainly
+  passed the early check and are queued on the `UPDATE`. Under READ COMMITTED, Postgres re-checks
+  `version = expected` against the newly committed row, so exactly one wins, one gets a conflict,
+  and exactly one history event is written. Deterministic, with no changes to the service.
+
+**Proof the test can fail.** Removing `version = expected` from the `UPDATE` turns it red.
+
+**Related decisions.**
+
+- The early version check stays, as a fast path that answers stale forms before validating the
+  transition ("someone else changed this" is more useful than "invalid transition").
+- Tracking-code collisions retry with `INSERT ... ON CONFLICT DO NOTHING RETURNING`, because a failed
+  statement aborts the whole Postgres transaction; the alternatives were retrying the whole
+  transaction or a savepoint per attempt.
+- Every read and write builds on one `visibleShipments(ctx)` condition (organization, plus "assigned
+  to me" for drivers), so the scope cannot be forgotten in one query. Removing the organization
+  filter fails seven tests.
+
+**At scale.** The same pattern works across services and APIs by exposing the version as an ETag
+and requiring `If-Match` on updates (HTTP 412 on conflict), which is the plan for the public API.
