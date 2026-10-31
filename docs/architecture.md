@@ -90,6 +90,8 @@ first; the user gets a clear conflict message and fresh data instead of a silent
 Format `WB-XXXX-XXXX`, using Crockford base32 (no I, L, O, U, so codes are easy to read aloud and type),
 generated from `crypto.getRandomValues`. 40 bits of randomness: not sequential, not guessable by
 enumeration. Unique index in the database; on the rare collision the insert retries with a new code.
+User input is normalized before lookup: case, spaces and dashes are ignored, the `WB` prefix is required,
+and Crockford look-alikes are mapped (I and L read as 1, O reads as 0).
 
 ## Public tracking page
 
