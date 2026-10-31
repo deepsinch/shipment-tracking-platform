@@ -11,7 +11,8 @@ Work proceeds in reviewable checkpoints: (1) scaffold + tooling, (2) DB, (3) aut
 (4) services + integration tests, (5) UI, (6) seed + e2e + README + docs. Finish one, get it green,
 commit, stop for architect review.
 
-**Checkpoint reached: 2 (DB).** lint, typecheck, test (51 unit + 5 integration) and build pass.
+**Checkpoint reached: 3 (auth).** format:check, lint, typecheck, test (53 unit + 24 integration) and
+build pass. Next: checkpoint 4 (services + integration tests).
 
 Done:
 
@@ -34,9 +35,11 @@ Next (remaining Phase 1 scope, from the original brief):
 - [x] Migration with a trigger that raises on UPDATE/DELETE (and TRUNCATE) of `shipment_events`.
       Migrations committed in `src/server/db/migrations/`.
 - [x] Integration test project against `waybill_test`, with the append-only trigger tests.
-- [ ] Better Auth: email/password + organization plugin, roles admin/dispatcher/driver; sign-up creates
+- [x] DB review fixes: migration 0002 (composite tenant FK on events, CHECK constraints) with tests;
+      lazy `getDb()` so importing the client needs no env vars.
+- [x] Better Auth: email/password + organization plugin, roles admin/dispatcher/driver; sign-up creates
       a user plus a new org where they are admin; sign-in, sign-out; session helper returning
-      `AuthContext` or redirecting; protection for `/dashboard`.
+      `AuthContext` or redirecting; protection for `/dashboard`. Pages are unstyled placeholders.
 - [ ] Services in `src/server/services/`: `createShipment`, `listShipments` (pagination, status filter,
       search by code or reference), `getShipment`, `changeShipmentStatus` (one transaction; result union
       ok / invalid_transition / conflict / not_found), `getPublicTracking(code)` (safe projection only).
@@ -129,6 +132,39 @@ drizzle-orm 0.45.4, drizzle-kit 0.31.11, pg 8.23, zod 4.6.7, @playwright/test 1.
 - **`"type": "module"`** is set in `package.json`, otherwise Vite warns that `vitest.config.ts` is
   ESM loaded as CommonJS (and the Better Auth CLI warns the same about its config).
 
+- **drizzle-kit can emit a composite FK before the unique constraint it references** (seen in
+  0002), which Postgres rejects. Read generated SQL; reorder by hand if needed (commented in 0002).
+- **DB client is lazy:** use `getDb()`, there is no module-level `db`. The client is created on first
+  call and cached on `globalThis`. The Better Auth instance is lazy the same way (`getAuth()`).
+
+### Auth (checkpoint 3)
+
+- **Layout:** `src/server/auth/options.ts` holds everything schema-relevant (email/password options
+  and the organization plugin with `ac`/`roles`); `auth.ts` (runtime, adds the Drizzle adapter, the
+  session hook and `nextCookies`) and `auth-schema.config.ts` (CLI) both spread it.
+  `pnpm auth:generate` rewrites `schema/auth.ts` byte-identically.
+- **Active organization:** a `databaseHooks.session.create.before` hook sets the session's
+  `activeOrganizationId` to the user's oldest membership. Sign-up therefore creates the org first and
+  signs in afterwards (`autoSignIn: false`).
+- **Gotcha: with `autoSignIn: false`, Better Auth returns a synthetic success for an existing email**
+  (fake user id, `token: null`, nothing stored) to prevent account enumeration. `signUpWithOrganization`
+  checks the returned id exists before creating an org. Our form does tell the user the email is
+  taken: a deliberate B2B UX choice; Better Auth's rate limiter (on in production) limits probing.
+- **Role** comes from the `member` row on every request (`resolveAuthContext`), not the session.
+- **Guards:** `proxy.ts` only checks a session cookie exists (optimistic). The real check is
+  `requireAuthContext()` in the dashboard layout (inside `<Suspense>`), in each page, and (from
+  checkpoint 4) at every service entry point via the `AuthContext` argument. A forged cookie passes
+  the proxy and is rejected by the server check (verified manually).
+- **Gotcha: React 19 resets uncontrolled forms after a Server Action completes.** Failed submissions
+  must echo the non-secret values back for `defaultValue`, or the user retypes everything.
+- **Gotcha for e2e: Next 16 keeps the previous route mounted but hidden** after client navigation
+  (state preservation), so `page.locator("main")` can match two elements. Target visible, specific
+  content (headings, labels). Next's route announcer also has `role="alert"`, so don't select error
+  messages by role alone.
+- **Testing auth without a browser:** `auth.api.signInEmail({ body, returnHeaders: true })` returns
+  the `Set-Cookie` headers; turn them into a `cookie` request header for `auth.api.getSession`.
+  `nextCookies()` is safe outside a request (it catches the missing request scope).
+
 ### Testing
 
 - `pnpm test` runs two Vitest projects: `unit` (`src/**/*.test.ts`) and `integration`
@@ -143,8 +179,12 @@ drizzle-orm 0.45.4, drizzle-kit 0.31.11, pg 8.23, zod 4.6.7, @playwright/test 1.
 
 ## Known issues / TODOs
 
-- Better Auth org deletion and user deletion will fail with an FK error once history exists (by
-  design, see gotchas). Disable org deletion in the Better Auth config (checkpoint 3).
+- User deletion fails with an FK error once the user has created shipments or events (by design).
+  Org deletion is disabled in Better Auth (`disableOrganizationDeletion`).
+- Sign-up is two Better Auth calls (user, then org) that cannot share a DB transaction; on org
+  failure the user is deleted again (compensation), but a crash between the two would leave an
+  org-less user, who can sign in but gets redirected away from `/dashboard`.
+- Only one organization per user is supported in the UI (no org switcher).
 
 ## Environment notes
 
