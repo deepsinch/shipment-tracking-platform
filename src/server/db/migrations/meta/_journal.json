@@ -29,6 +29,13 @@
       "when": 1793466740816,
       "tag": "0003_auth_rate_limits",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1793467674242,
+      "tag": "0004_driver_assigned_event",
+      "breakpoints": true
     }
   ]
 }

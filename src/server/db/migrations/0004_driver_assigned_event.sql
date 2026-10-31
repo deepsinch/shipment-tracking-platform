@@ -1,0 +1,1 @@
+ALTER TYPE "public"."shipment_event_type" ADD VALUE 'driver_assigned';
