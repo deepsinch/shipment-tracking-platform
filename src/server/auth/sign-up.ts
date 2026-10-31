@@ -6,6 +6,7 @@ import { getDb } from "@/server/db/client";
 import { user } from "@/server/db/schema";
 
 import { getAuth } from "./auth";
+import { consumeRateLimit, RATE_LIMITS, type RateLimited } from "./rate-limit";
 
 export const signUpSchema = z.object({
   name: z.string().trim().min(1, "Enter your name").max(100),
@@ -68,6 +69,20 @@ export async function signUpWithOrganization(input: unknown): Promise<SignUpResu
     await getDb().delete(user).where(eq(user.id, userId));
     throw error;
   }
+}
+
+/**
+ * Sign-up from a public form: every submission from an IP counts toward `RATE_LIMITS.signUpPerIp`
+ * (counted before validation, so the limit also caps probing), then signs up as usual.
+ */
+export async function signUpFromRequest(
+  input: unknown,
+  request: { ip: string },
+  now: Date = new Date(),
+): Promise<SignUpResult | RateLimited> {
+  const limit = await consumeRateLimit(RATE_LIMITS.signUpPerIp, request.ip, now);
+  if (limit.limited) return { ok: false, reason: "rate_limited", retryAfterMs: limit.retryAfterMs };
+  return signUpWithOrganization(input);
 }
 
 /** URL-safe slug with a random suffix, so two companies with the same name never collide. */
