@@ -8,12 +8,14 @@ import {
   createTestOrganization,
   createTestShipment,
 } from "../../../tests/integration/fixtures";
+import { assignDriver } from "./assign-driver";
 import { changeShipmentStatus } from "./change-shipment-status";
 import { getPublicTracking, type PublicTracking } from "./public-tracking";
 
 describe("getPublicTracking", () => {
   let shipment: Shipment;
   let driverId: string;
+  let secondDriverId: string;
 
   beforeAll(async () => {
     const orgId = (await createTestOrganization()).id;
@@ -37,6 +39,16 @@ describe("getPublicTracking", () => {
       location: { city: "Rotterdam", lat: 51.92, lng: 4.48 },
     });
     if (!result.ok) throw new Error("setup failed");
+
+    // Internal history: a reassignment must never reach the public timeline.
+    const secondDriver = await createTestContext(orgId, "driver");
+    secondDriverId = secondDriver.userId;
+    const reassigned = await assignDriver(dispatcher, {
+      shipmentId: shipment.id,
+      expectedVersion: 2,
+      driverId: secondDriver.userId,
+    });
+    if (!reassigned.ok) throw new Error("setup failed");
   });
 
   const track = async (code: string): Promise<PublicTracking> => {
@@ -109,10 +121,18 @@ describe("getPublicTracking", () => {
       shipment.organizationId,
       shipment.createdBy,
       driverId,
+      secondDriverId,
       "51.92",
     ]) {
       expect(serialized).not.toContain(secret);
     }
+  });
+
+  it("lists only customer-facing event types, never driver assignments", async () => {
+    const { timeline } = await track(shipment.trackingCode);
+
+    expect(timeline.map((entry) => entry.type)).toEqual(["created", "status_changed"]);
+    expect(JSON.stringify(timeline)).not.toContain("driver_assigned");
   });
 
   it.each([

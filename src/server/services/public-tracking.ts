@@ -1,8 +1,8 @@
 import "server-only";
 
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 
-import type { ShipmentEventType } from "@/domain/shipment-event";
+import { PUBLIC_SHIPMENT_EVENT_TYPES, type PublicShipmentEventType } from "@/domain/shipment-event";
 import type { ShipmentStatus } from "@/domain/shipment-status";
 import { normalizeTrackingCode } from "@/domain/tracking-code";
 import { getDb } from "@/server/db/client";
@@ -12,8 +12,9 @@ import { shipmentEvents, shipments } from "@/server/db/schema";
  * What anyone holding a tracking code may see. Built from an explicit column list (never
  * `select()` of a whole row), so a new column on `shipments` or `shipment_events` stays private
  * until someone deliberately adds it here. Recipient details, street addresses, internal notes,
- * drivers, actors and internal ids are never included. See docs/architecture.md,
- * "Public tracking page".
+ * drivers, actors and internal ids are never included. The timeline holds only customer-facing
+ * event types (`PUBLIC_SHIPMENT_EVENT_TYPES`, an allow-list), so internal history such as driver
+ * assignments never appears. See docs/architecture.md, "Public tracking page".
  */
 export type PublicTracking = {
   trackingCode: string;
@@ -25,7 +26,7 @@ export type PublicTracking = {
 };
 
 export type PublicTrackingEvent = {
-  type: ShipmentEventType;
+  type: PublicShipmentEventType;
   /** The status the shipment entered with this event. */
   status: ShipmentStatus | null;
   occurredAt: Date;
@@ -60,7 +61,7 @@ export async function getPublicTracking(code: string): Promise<PublicTracking | 
     .limit(1);
   if (!shipment) return null;
 
-  const timeline = await db
+  const rows = await db
     .select({
       type: shipmentEvents.type,
       status: shipmentEvents.toStatus,
@@ -69,8 +70,15 @@ export async function getPublicTracking(code: string): Promise<PublicTracking | 
       publicNote: shipmentEvents.publicNote,
     })
     .from(shipmentEvents)
-    .where(eq(shipmentEvents.shipmentId, shipment.id))
+    .where(
+      and(
+        eq(shipmentEvents.shipmentId, shipment.id),
+        inArray(shipmentEvents.type, PUBLIC_SHIPMENT_EVENT_TYPES),
+      ),
+    )
     .orderBy(asc(shipmentEvents.occurredAt), asc(shipmentEvents.recordedAt));
+  // The WHERE clause above admits only public types; the column type cannot know that.
+  const timeline = rows as PublicTrackingEvent[];
 
   return {
     trackingCode: shipment.trackingCode,
