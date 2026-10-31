@@ -5,14 +5,15 @@ import { SiteHeader } from "@/components/site-header";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ROLE_LABELS } from "@/domain/roles";
-import { getCurrentUser, requireAuthContext } from "@/server/auth/session";
+import { getCurrentUser, requireAuthContextOn } from "@/server/auth/session";
 
 import { signOutAction } from "../(auth)/actions";
 
 /**
  * The session read happens inside <Suspense> (Cache Components rule). Children render only after
- * the auth check passes. Pages still call requireAuthContext() themselves: a layout does not
- * re-render on every client navigation, so it is not the only guard.
+ * the auth check passes; drivers are sent to the driver app. Pages run the same check themselves
+ * (`requireAuthContextOn`): a layout does not re-render on every client navigation, so it is not
+ * the only guard.
  */
 export default function DashboardLayout({ children }: LayoutProps<"/dashboard">) {
   return (
@@ -23,7 +24,7 @@ export default function DashboardLayout({ children }: LayoutProps<"/dashboard">)
 }
 
 async function AuthenticatedShell({ children }: { children: React.ReactNode }) {
-  const context = await requireAuthContext();
+  const context = await requireAuthContextOn("/dashboard");
   const user = await getCurrentUser();
 
   return (

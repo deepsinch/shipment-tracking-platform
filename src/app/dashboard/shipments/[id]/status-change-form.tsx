@@ -1,15 +1,12 @@
 "use client";
 
-import { CircleCheckIcon } from "lucide-react";
 import { useActionState } from "react";
 
-import { FormAlert } from "@/components/form-alert";
+import { changeStatusAction, type StatusFormState } from "@/app/_actions/change-status";
+import { ActionMessage } from "@/components/action-message";
 import { SelectField, TextAreaField, TextField } from "@/components/form-field";
-import { Alert, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { shipmentStatusLabel, type ShipmentStatus } from "@/domain/shipment-status";
-
-import { changeStatusAction, type StatusFormState } from "../actions";
 
 type Props = {
   shipmentId: string;
@@ -41,7 +38,7 @@ export function StatusChangeForm({ shipmentId, version, status, options }: Props
 
   return (
     <div className="flex flex-col gap-4">
-      <StatusMessage state={state} />
+      <ActionMessage state={state} />
       {options.length === 0 ? (
         <p className="text-sm text-muted-foreground">
           This shipment is {shipmentStatusLabel(status).toLowerCase()}. Its status can no longer
@@ -87,19 +84,4 @@ export function StatusChangeForm({ shipmentId, version, status, options }: Props
       )}
     </div>
   );
-}
-
-function StatusMessage({ state }: { state: StatusFormState }) {
-  if (state.outcome === "updated") {
-    return (
-      <Alert role="status" data-testid="form-status">
-        <CircleCheckIcon aria-hidden="true" className="text-emerald-600" />
-        <AlertTitle>{state.message}</AlertTitle>
-      </Alert>
-    );
-  }
-  if (state.outcome === "conflict" || state.outcome === "error") {
-    return <FormAlert title={state.title}>{state.message}</FormAlert>;
-  }
-  return null;
 }

@@ -20,11 +20,14 @@ describe("signIn rate limits", () => {
     await getAuth().api.signUpEmail({ body: { name: "Rita", email, password: PASSWORD } });
   });
 
+  // Rita belongs to no organization, so her session has no AuthContext.
+  const signedIn = { ok: true, context: null };
+
   const attempt = (ip: string, password: string, now = t0, who = email) =>
     signIn({ email: who, password }, { ip }, now);
 
   it("signs in with the right password", async () => {
-    expect(await attempt(fakeIp(), PASSWORD)).toEqual({ ok: true });
+    expect(await attempt(fakeIp(), PASSWORD)).toEqual(signedIn);
   });
 
   it("locks an account from one IP after 5 failures, even for the right password", async () => {
@@ -35,9 +38,9 @@ describe("signIn rate limits", () => {
     const locked = await attempt(ip, PASSWORD, minutesLater(1));
     expect(locked).toEqual({ ok: false, reason: "rate_limited", retryAfterMs: 14 * 60 * 1000 });
     // Another IP is not affected by the per-account limit.
-    expect(await attempt(fakeIp(), PASSWORD, minutesLater(1))).toEqual({ ok: true });
+    expect(await attempt(fakeIp(), PASSWORD, minutesLater(1))).toEqual(signedIn);
     // And the window ends.
-    expect(await attempt(ip, PASSWORD, minutesLater(15))).toEqual({ ok: true });
+    expect(await attempt(ip, PASSWORD, minutesLater(15))).toEqual(signedIn);
   });
 
   it("answers the same for an unknown email, so the limit reveals nothing", async () => {
@@ -52,10 +55,10 @@ describe("signIn rate limits", () => {
   it("clears the account's failures after a successful sign-in", async () => {
     const ip = fakeIp();
     for (let i = 0; i < 4; i++) await attempt(ip, "wrong");
-    expect(await attempt(ip, PASSWORD)).toEqual({ ok: true });
+    expect(await attempt(ip, PASSWORD)).toEqual(signedIn);
 
     for (let i = 0; i < 4; i++) await attempt(ip, "wrong");
-    expect(await attempt(ip, PASSWORD)).toEqual({ ok: true });
+    expect(await attempt(ip, PASSWORD)).toEqual(signedIn);
   });
 
   it("caps attempts per IP across many accounts", async () => {
@@ -67,6 +70,33 @@ describe("signIn rate limits", () => {
     }
 
     expect(await attempt(ip, PASSWORD)).toMatchObject({ reason: "rate_limited" });
+  });
+});
+
+describe("signIn context", () => {
+  it("returns the new session's organization and role, for the role-based landing", async () => {
+    const owner = await signUpFromRequest(
+      {
+        name: "Olga",
+        email: `${randomUUID()}@example.test`,
+        password: PASSWORD,
+        organizationName: "Context Freight",
+      },
+      { ip: fakeIp() },
+    );
+    if (!owner.ok) throw new Error("setup failed");
+    const email = `${randomUUID()}@example.test`;
+    const { user } = await getAuth().api.signUpEmail({
+      body: { name: "Dirk", email, password: PASSWORD },
+    });
+    await getAuth().api.addMember({
+      body: { userId: user.id, organizationId: owner.organizationId, role: "driver" },
+    });
+
+    expect(await signIn({ email, password: PASSWORD }, { ip: fakeIp() })).toEqual({
+      ok: true,
+      context: { userId: user.id, organizationId: owner.organizationId, role: "driver" },
+    });
   });
 });
 

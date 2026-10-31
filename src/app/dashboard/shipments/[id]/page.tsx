@@ -1,32 +1,25 @@
-import {
-  ArrowLeftIcon,
-  ArrowRightIcon,
-  ExternalLinkIcon,
-  LockIcon,
-  MapPinIcon,
-} from "lucide-react";
+import { ArrowLeftIcon, ArrowRightIcon, ExternalLinkIcon } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { cache } from "react";
 
 import { StatusBadge } from "@/components/status-badge";
-import { Timeline, TimelineItem } from "@/components/timeline";
+import { ShipmentHistory } from "@/components/shipment-history";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SERVICE_LEVEL_LABELS } from "@/domain/service-level";
-import { shipmentEventTitle } from "@/domain/shipment-event";
 import { statusOptionsFor } from "@/domain/shipment-permissions";
 import { formatDateTime, formatPlace, formatWeight } from "@/lib/format";
-import { requireAuthContext } from "@/server/auth/session";
+import { requireAuthContextOn } from "@/server/auth/session";
 import type { Shipment } from "@/server/db/schema";
-import { getShipment, type ShipmentEventWithActor } from "@/server/services/get-shipment";
+import { getShipment } from "@/server/services/get-shipment";
 
 import { StatusChangeForm } from "./status-change-form";
 
 /** One lookup per request, shared by the metadata and the page. Not found ends both. */
 const loadShipment = cache(async (id: string) => {
-  const ctx = await requireAuthContext();
+  const ctx = await requireAuthContextOn("/dashboard");
   const result = await getShipment(ctx, id);
   if (!result.ok) notFound();
   return { ctx, ...result };
@@ -74,28 +67,31 @@ export default async function ShipmentPage({ params }: PageProps<"/dashboard/shi
       </div>
 
       {/* DOM order (details, status, history) is also the mobile order. */}
-      <div className="grid items-start gap-6 lg:grid-cols-3">
+      {/* Row 1 sizes to the details; the taller side column grows into row 2, not row 1. */}
+      <div className="grid items-start gap-6 lg:grid-cols-3 lg:grid-rows-[auto_1fr]">
         <ShipmentDetails
           shipment={shipment}
           assignedDriverName={assignedDriverName}
           className="lg:col-span-2"
         />
-        <Card className="lg:col-start-3 lg:row-span-2 lg:row-start-1">
-          <CardHeader>
-            <CardTitle>
-              <h2>Update status</h2>
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {/* Server-rendered props; the form re-reads them after every revalidation. */}
-            <StatusChangeForm
-              shipmentId={shipment.id}
-              version={shipment.version}
-              status={shipment.status}
-              options={options}
-            />
-          </CardContent>
-        </Card>
+        <div className="flex flex-col gap-6 lg:col-start-3 lg:row-span-2 lg:row-start-1">
+          <Card>
+            <CardHeader>
+              <CardTitle>
+                <h2>Update status</h2>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {/* Server-rendered props; the form re-reads them after every revalidation. */}
+              <StatusChangeForm
+                shipmentId={shipment.id}
+                version={shipment.version}
+                status={shipment.status}
+                options={options}
+              />
+            </CardContent>
+          </Card>
+        </div>
         <ShipmentHistory events={events} className="lg:col-span-2" />
       </div>
     </main>
@@ -184,68 +180,5 @@ function Detail({ label, children }: { label: string; children: React.ReactNode 
       <dt className="text-muted-foreground">{label}</dt>
       <dd>{children}</dd>
     </div>
-  );
-}
-
-function ShipmentHistory({
-  events,
-  className,
-}: {
-  events: ShipmentEventWithActor[];
-  className?: string;
-}) {
-  const newestFirst = [...events].reverse();
-  return (
-    <Card className={className}>
-      <CardHeader>
-        <CardTitle>
-          <h2>History</h2>
-        </CardTitle>
-        <CardDescription>Every change is recorded and cannot be edited.</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <Timeline aria-label="Shipment history">
-          {newestFirst.map((event, index) => (
-            <TimelineItem key={event.id} highlighted={index === 0}>
-              <div className="flex flex-col gap-1 text-sm">
-                <div className="flex flex-wrap items-baseline justify-between gap-x-4">
-                  <span className="font-medium">
-                    {shipmentEventTitle(event.type, event.toStatus)}
-                  </span>
-                  <time dateTime={event.occurredAt.toISOString()} className="text-muted-foreground">
-                    {formatDateTime(event.occurredAt)}
-                  </time>
-                </div>
-                <p className="flex flex-wrap items-center gap-x-1.5 text-muted-foreground">
-                  <span>by {event.actorName ?? "System"}</span>
-                  {event.locationCity && (
-                    <>
-                      <span aria-hidden="true">·</span>
-                      <MapPinIcon className="size-3.5" aria-hidden="true" />
-                      <span>{event.locationCity}</span>
-                    </>
-                  )}
-                </p>
-                {event.publicNote && (
-                  <p>
-                    <span className="sr-only">Note for the customer: </span>
-                    {event.publicNote}
-                  </p>
-                )}
-                {event.internalNote && (
-                  <p className="flex items-start gap-1.5 rounded-md bg-muted px-2 py-1.5">
-                    <LockIcon className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
-                    <span>
-                      <span className="sr-only">Internal note: </span>
-                      {event.internalNote}
-                    </span>
-                  </p>
-                )}
-              </div>
-            </TimelineItem>
-          ))}
-        </Timeline>
-      </CardContent>
-    </Card>
   );
 }

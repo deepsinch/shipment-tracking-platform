@@ -20,7 +20,7 @@ import {
 import { canCreateShipments } from "@/domain/shipment-permissions";
 import { SHIPMENT_STATUSES, shipmentStatusLabel } from "@/domain/shipment-status";
 import { formatDate } from "@/lib/format";
-import { requireAuthContext } from "@/server/auth/session";
+import { requireAuthContextOn } from "@/server/auth/session";
 import { listShipments, type ShipmentPage } from "@/server/services/list-shipments";
 
 export const metadata: Metadata = { title: "Shipments" };
@@ -41,7 +41,7 @@ function listHref({ status, q }: Filters, page: number): string {
 }
 
 export default async function ShipmentsPage({ searchParams }: PageProps<"/dashboard/shipments">) {
-  const ctx = await requireAuthContext();
+  const ctx = await requireAuthContextOn("/dashboard");
   const params = await searchParams;
   const filters: Filters = { status: first(params.status), q: first(params.q)?.trim() };
 
