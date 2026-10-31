@@ -98,3 +98,57 @@ test("a stale driver form reports the conflict and keeps the chosen driver", asy
     "Reassigned from Ari Driver to Bea Driver",
   );
 });
+
+test("marking a shipment delivered asks for confirmation, by touch or keyboard", async ({
+  page,
+  browser,
+}) => {
+  const adminEmail = await signUp(page, "Vic Dispatcher");
+  const trackingCode = await createShipment(page);
+  const driverEmail = await addDriver(adminEmail, "Rui Driver");
+  await page.reload();
+  await page.getByLabel("Assigned driver").selectOption({ label: "Rui Driver" });
+  await page.getByRole("button", { name: "Save driver" }).click();
+  await expect(page.getByTestId("form-status")).toHaveText("Driver assigned.");
+
+  const phone = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  await signIn(phone, driverEmail);
+  await phone.getByRole("link", { name: new RegExp(trackingCode) }).click();
+  for (const [button, status] of [
+    ["Mark as picked up", "Picked up"],
+    ["Mark as in transit", "In transit"],
+    ["Mark as out for delivery", "Out for delivery"],
+  ] as const) {
+    await phone.getByRole("button", { name: button }).click();
+    await expect(phone.getByTestId("form-status")).toHaveText(`Status changed to ${status}.`);
+  }
+
+  // The first tap only asks. Backing out changes nothing.
+  await phone.getByRole("button", { name: "Mark as delivered" }).click();
+  const dialog = phone.getByRole("alertdialog", { name: `Mark ${trackingCode} as delivered?` });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toHaveAccessibleDescription(/cannot be undone/);
+  // Focus starts on the safe choice.
+  await expect(dialog.getByRole("button", { name: "Not yet" })).toBeFocused();
+  await dialog.getByRole("button", { name: "Not yet" }).click();
+  await expect(dialog).toBeHidden();
+  await expect(phone.getByTestId("form-status")).toHaveText("Status changed to Out for delivery.");
+
+  // Escape closes it too.
+  await phone.getByRole("button", { name: "Mark as delivered" }).click();
+  await expect(dialog).toBeVisible();
+  await phone.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+
+  // By keyboard: open, move to the confirm button, press Enter.
+  await phone.getByRole("button", { name: "Mark as delivered" }).focus();
+  await phone.keyboard.press("Enter");
+  await expect(dialog).toBeVisible();
+  await phone.keyboard.press("Tab");
+  await expect(dialog.getByRole("button", { name: "Confirm delivery" })).toBeFocused();
+  await phone.keyboard.press("Enter");
+  await expect(phone.getByTestId("form-status")).toHaveText("Status changed to Delivered.");
+  await expect(
+    phone.getByText("This shipment is delivered. Nothing more to do here."),
+  ).toBeVisible();
+});

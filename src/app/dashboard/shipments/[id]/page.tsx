@@ -90,6 +90,7 @@ export default async function ShipmentPage({ params }: PageProps<"/dashboard/shi
               {/* Server-rendered props; the form re-reads them after every revalidation. */}
               <StatusChangeForm
                 shipmentId={shipment.id}
+                trackingCode={shipment.trackingCode}
                 version={shipment.version}
                 status={shipment.status}
                 options={options}

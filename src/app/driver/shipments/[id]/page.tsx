@@ -83,6 +83,7 @@ export default async function DriverShipmentPage({ params }: PageProps<"/driver/
         <CardContent>
           <DriverStatusForm
             shipmentId={shipment.id}
+            trackingCode={shipment.trackingCode}
             version={shipment.version}
             status={shipment.status}
             options={statusOptionsFor(ctx.role, shipment.status)}

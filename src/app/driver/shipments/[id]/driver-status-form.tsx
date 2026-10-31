@@ -1,18 +1,23 @@
 "use client";
 
 import { CircleAlertIcon, LoaderCircleIcon } from "lucide-react";
-import { useActionState } from "react";
+import { useActionState, useId } from "react";
 import { useFormStatus } from "react-dom";
 
 import { changeStatusAction, type StatusFormState } from "@/app/_actions/change-status";
 import { ActionMessage } from "@/components/action-message";
 import { TextAreaField } from "@/components/form-field";
+import {
+  TerminalStatusDialog,
+  useTerminalStatusConfirmation,
+} from "@/components/terminal-status-confirmation";
 import { Button } from "@/components/ui/button";
 import { statusActionLabel } from "@/domain/driver-tasks";
 import { shipmentStatusLabel, type ShipmentStatus } from "@/domain/shipment-status";
 
 type Props = {
   shipmentId: string;
+  trackingCode: string;
   /** The version this page was rendered from; sent back for the optimistic concurrency check. */
   version: number;
   status: ShipmentStatus;
@@ -27,9 +32,14 @@ type Props = {
  * Same action and conflict handling as the dashboard form: the state lives above the form, a
  * conflict revalidates the page, and the form remounts on the new version (key) with the typed
  * note echoed back and only the buttons that are still allowed.
+ *
+ * "Mark as delivered" cannot be undone, so it asks for confirmation first (see
+ * `useTerminalStatusConfirmation`).
  */
-export function DriverStatusForm({ shipmentId, version, status, options }: Props) {
+export function DriverStatusForm({ shipmentId, trackingCode, version, status, options }: Props) {
   const [state, action] = useActionState<StatusFormState, FormData>(changeStatusAction, {});
+  const formId = useId();
+  const confirmation = useTerminalStatusConfirmation();
 
   return (
     <div className="flex flex-col gap-4">
@@ -39,7 +49,14 @@ export function DriverStatusForm({ shipmentId, version, status, options }: Props
           This shipment is {shipmentStatusLabel(status).toLowerCase()}. Nothing more to do here.
         </p>
       ) : (
-        <form key={version} action={action} noValidate className="flex flex-col gap-4">
+        <form
+          key={version}
+          id={formId}
+          action={action}
+          onSubmit={confirmation.onSubmit}
+          noValidate
+          className="flex flex-col gap-4"
+        >
           <input type="hidden" name="shipmentId" value={shipmentId} />
           <input type="hidden" name="expectedVersion" value={version} />
           <TextAreaField
@@ -51,6 +68,13 @@ export function DriverStatusForm({ shipmentId, version, status, options }: Props
             errors={state.fieldErrors?.publicNote}
           />
           <StatusButtons options={options} />
+          <TerminalStatusDialog
+            formId={formId}
+            trackingCode={trackingCode}
+            status={confirmation.pendingStatus}
+            onDismiss={confirmation.dismiss}
+            submitsStatus
+          />
         </form>
       )}
     </div>

@@ -1,15 +1,20 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useId } from "react";
 
 import { changeStatusAction, type StatusFormState } from "@/app/_actions/change-status";
 import { ActionMessage } from "@/components/action-message";
 import { SelectField, TextAreaField, TextField } from "@/components/form-field";
+import {
+  TerminalStatusDialog,
+  useTerminalStatusConfirmation,
+} from "@/components/terminal-status-confirmation";
 import { Button } from "@/components/ui/button";
 import { shipmentStatusLabel, type ShipmentStatus } from "@/domain/shipment-status";
 
 type Props = {
   shipmentId: string;
+  trackingCode: string;
   /** The version this page was rendered from; sent back for the optimistic concurrency check. */
   version: number;
   status: ShipmentStatus;
@@ -21,12 +26,17 @@ type Props = {
  * The action state lives here, above the form, so a message survives the form being re-keyed. On a
  * conflict the action revalidates the page: this component then receives the new `version`,
  * `status` and `options`, and the form remounts (key = version) with the user's notes echoed back.
+ *
+ * Delivered and cancelled cannot be undone, so choosing one asks for confirmation before the form
+ * is submitted (see `useTerminalStatusConfirmation`).
  */
-export function StatusChangeForm({ shipmentId, version, status, options }: Props) {
+export function StatusChangeForm({ shipmentId, trackingCode, version, status, options }: Props) {
   const [state, action, pending] = useActionState<StatusFormState, FormData>(
     changeStatusAction,
     {},
   );
+  const formId = useId();
+  const confirmation = useTerminalStatusConfirmation();
   const values = state.values;
   const field = (name: string) => ({
     name,
@@ -45,7 +55,14 @@ export function StatusChangeForm({ shipmentId, version, status, options }: Props
           change.
         </p>
       ) : (
-        <form key={version} action={action} noValidate className="flex flex-col gap-4">
+        <form
+          key={version}
+          id={formId}
+          action={action}
+          onSubmit={confirmation.onSubmit}
+          noValidate
+          className="flex flex-col gap-4"
+        >
           <input type="hidden" name="shipmentId" value={shipmentId} />
           <input type="hidden" name="expectedVersion" value={version} />
           <SelectField
@@ -80,6 +97,12 @@ export function StatusChangeForm({ shipmentId, version, status, options }: Props
           <Button type="submit" disabled={pending}>
             {pending ? "Updating…" : "Update status"}
           </Button>
+          <TerminalStatusDialog
+            formId={formId}
+            trackingCode={trackingCode}
+            status={confirmation.pendingStatus}
+            onDismiss={confirmation.dismiss}
+          />
         </form>
       )}
     </div>
