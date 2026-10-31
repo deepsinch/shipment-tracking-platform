@@ -22,7 +22,7 @@ export function assertDatabaseName(
   rule: string,
 ): void {
   const name = databaseName(url);
-  if (!allowed(name)) throw new Error(`Refusing to reset "${name}": ${rule}.`);
+  if (!allowed(name)) throw new Error(`Refusing to use "${name}": ${rule}.`);
 }
 
 /** Creates the database if it does not exist yet, connecting to the `postgres` maintenance DB. */
