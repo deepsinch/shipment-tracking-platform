@@ -38,3 +38,11 @@ const weight = new Intl.NumberFormat("en-GB", { maximumFractionDigits: 2 });
 export function formatWeight(kg: number): string {
   return `${weight.format(kg)} kg`;
 }
+
+/** "just now", "12 s ago", "3 min ago": how long ago something happened, for live status text. */
+export function formatElapsed(ms: number): string {
+  const seconds = Math.max(0, Math.floor(ms / 1000));
+  if (seconds < 5) return "just now";
+  if (seconds < 60) return `${seconds} s ago`;
+  return `${Math.floor(seconds / 60)} min ago`;
+}

@@ -9,6 +9,7 @@ import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { nextStopFor, type NextStop } from "@/domain/driver-tasks";
+import { isLocationSharingStatus } from "@/domain/location-sharing";
 import { SERVICE_LEVEL_LABELS } from "@/domain/service-level";
 import { statusOptionsFor } from "@/domain/shipment-permissions";
 import { formatCountry, formatPlace, formatWeight } from "@/lib/format";
@@ -18,6 +19,7 @@ import { getShipment } from "@/server/services/get-shipment";
 
 import { DueTime } from "../../due-time";
 import { DriverStatusForm } from "./driver-status-form";
+import { LocationSharing } from "./location-sharing";
 
 /** One lookup per request, shared by the metadata and the page. Not found ends both. */
 const loadShipment = cache(async (id: string) => {
@@ -57,6 +59,20 @@ export default async function DriverShipmentPage({ params }: PageProps<"/driver/
       </div>
 
       {stop && <NextStopCard shipment={shipment} stop={stop} now={new Date()} />}
+
+      {/* Only while on the road: when the status moves on, this unmounts and sharing stops. */}
+      {isLocationSharingStatus(shipment.status) && (
+        <Card>
+          <CardHeader>
+            <CardTitle>
+              <h2>Location</h2>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <LocationSharing key={shipment.id} shipmentId={shipment.id} />
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>

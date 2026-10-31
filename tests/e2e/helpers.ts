@@ -62,6 +62,18 @@ export async function addDriver(adminEmail: string, name: string): Promise<strin
   return email;
 }
 
+/** The shipment's stored latest position (no map UI yet), read from the e2e database. */
+export async function readPosition(
+  trackingCode: string,
+): Promise<{ lat: number; lng: number; accuracyM: number } | null> {
+  const { stdout } = await promisify(execFile)(
+    "pnpm",
+    ["exec", "tsx", "--conditions=react-server", "tests/e2e/read-position.ts", trackingCode],
+    { env: { ...process.env, DATABASE_URL: process.env.E2E_DATABASE_URL } },
+  );
+  return JSON.parse(stdout);
+}
+
 /** Books a shipment from the list page and returns its tracking code (on its detail page). */
 export async function createShipment(page: Page): Promise<string> {
   await page.getByRole("link", { name: "New shipment" }).click();
