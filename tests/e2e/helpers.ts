@@ -50,6 +50,18 @@ export async function expectLive(page: Page): Promise<void> {
   await expect(page.getByTestId("live-indicator")).toHaveAttribute("data-status", "live");
 }
 
+/**
+ * Marks the page's window. The mark survives client-side re-renders (`router.refresh()`) but not
+ * a reload, so `expectNotReloaded` proves an update arrived live.
+ */
+export async function markWindow(page: Page): Promise<void> {
+  await page.evaluate(() => Object.assign(window, { __waybillNotReloaded: true }));
+}
+
+export async function expectNotReloaded(page: Page): Promise<void> {
+  expect(await page.evaluate(() => "__waybillNotReloaded" in window)).toBe(true);
+}
+
 /** Signs in with the shared e2e password; where the user lands depends on their role. */
 export async function signIn(page: Page, email: string): Promise<void> {
   await page.goto("/sign-in");
@@ -83,7 +95,7 @@ export async function addDriver(adminEmail: string, name: string): Promise<strin
   return email;
 }
 
-/** The shipment's stored latest position (no map UI yet), read from the e2e database. */
+/** The shipment's stored latest position, read from the e2e database. */
 export async function readPosition(
   trackingCode: string,
 ): Promise<{ lat: number; lng: number; accuracyM: number } | null> {

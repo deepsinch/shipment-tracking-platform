@@ -1,19 +1,16 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test } from "./fixtures";
 
-import { addDriver, createShipment, expectLive, signIn, signUp } from "./helpers";
+import {
+  addDriver,
+  createShipment,
+  expectLive,
+  expectNotReloaded,
+  markWindow,
+  signIn,
+  signUp,
+} from "./helpers";
 
 const ANTWERP_RING = { latitude: 51.2194, longitude: 4.4025, accuracy: 15 };
-
-/**
- * Marks the page's window. The mark survives client-side re-renders (`router.refresh()`) but not
- * a reload, so `expectNotReloaded` proves an update arrived live.
- */
-async function markWindow(page: Page) {
-  await page.evaluate(() => Object.assign(window, { __waybillNotReloaded: true }));
-}
-async function expectNotReloaded(page: Page) {
-  expect(await page.evaluate(() => "__waybillNotReloaded" in window)).toBe(true);
-}
 
 test("the dispatcher's detail page follows the driver's updates without a reload", async ({
   page,
@@ -57,6 +54,10 @@ test("the dispatcher's detail page follows the driver's updates without a reload
   await phone.getByRole("switch", { name: /Share my location/ }).click();
   await expect(page.getByTestId("last-seen")).toContainText("near 51.2194, 4.4025");
   await expect(page.getByTestId("last-seen")).toContainText("UTC");
+  // The route map's position marker appears with the first fix.
+  const marker = page.getByRole("img", { name: `${trackingCode}, Picked up, to Antwerp` });
+  await expect(marker).toHaveAttribute("data-lat", String(ANTWERP_RING.latitude));
+  await expect(marker).toHaveAttribute("data-lng", String(ANTWERP_RING.longitude));
   await expectNotReloaded(page);
 
   // While the dispatcher is typing, a refresh would wipe the form: it waits and says so.
