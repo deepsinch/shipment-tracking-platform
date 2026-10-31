@@ -5,94 +5,51 @@ learn something a newcomer would trip over. Design rationale lives in `docs/arch
 
 ## Current status
 
-**Phase 1 (core) in progress on branch `phase-1-core`.**
+**Phase 1 (core) is complete on branch `phase-1-core`** (checkpoint 6 reached). format:check,
+lint, typecheck, test (74 unit + 97 integration), build and test:e2e (3 specs) pass.
 
-Work proceeds in reviewable checkpoints: (1) scaffold + tooling, (2) DB, (3) auth,
-(4) services + integration tests, (5) UI, (6) seed + e2e + README + docs. Finish one, get it green,
-commit, stop for architect review.
+Phase 1 delivered, checkpoint by checkpoint:
 
-**Checkpoint reached: 5b (shipment pages, public tracking page, Playwright, README).**
-format:check, lint, typecheck, test (72 unit + 81 integration), build and test:e2e (3 specs) pass.
+1. Scaffold and tooling (Next.js 16, TypeScript strict, ESLint, Prettier, Vitest).
+2. Database: Drizzle schema, committed migrations, append-only `shipment_events` trigger, tenant FK
+   and CHECK constraints, real-Postgres integration tests.
+3. Auth: Better Auth with organizations and roles, `AuthContext`, layered guards.
+4. Services with result unions: create, list, get, change status (state machine + optimistic
+   concurrency + event in one transaction), public tracking projection.
+5. UI: landing, auth pages, dashboard list, create, detail with status changes and conflict
+   handling, public tracking page; Playwright e2e against a dedicated database; README.
+6. Demo seed (`pnpm db:seed`), sign-in/sign-up rate limiting, Phase 1 docs.
 
-Checkpoint 5a (done): review fixes (drivers cannot cancel, `occurredAt` not before the latest
-event), shadcn/ui, landing page with the track form, restyled auth pages, dashboard shell, and the
-shipments list (GET filters, URL pagination, empty states, `loading.tsx`).
+**Next: Phase 2 (driver and live tracking).** Proposed checkpoints, each green and reviewed:
 
-Checkpoint 5b (done):
-
-- [x] `listDrivers(ctx)` service (admin/dispatcher, org-scoped, `canAssignDrivers`) with tests.
-- [x] `getShipment` returns `assignedDriverName` and `actorName` per event (left joins on `user`).
-- [x] `/dashboard/shipments/new`: form + `createShipmentAction`, field errors, values echoed back,
-      optional driver; drivers are redirected to the list; success redirects to the detail page.
-- [x] `/dashboard/shipments/[id]`: details, history (actor, city, public and internal notes), status
-      form from `statusOptionsFor`, every result kind handled, terminal statuses show no form,
-      `loading.tsx`, `not-found.tsx`, dynamic title.
-- [x] `/track/[code]`: status, plain-language copy, progress bar (`src/domain/tracking-progress.ts`),
-      route, promised/actual delivery, public timeline, `generateMetadata` with noindex, friendly
-      not-found, `loading.tsx`. Mobile-first.
-- [x] Playwright: `playwright.config.ts`, `pnpm test:e2e`, dedicated `waybill_e2e` database.
-      Specs: happy path, stale-form conflict + retry, unknown code.
-- [x] README.
-- [x] Visual check with screenshots at 1280px and 390px (new, new with errors, detail, detail with a
-      conflict, track, track not-found).
-
-**Next, checkpoint 6:**
-
-- [ ] `pnpm db:seed`: "Demo Freight Co", admin@/dispatcher@/driver@demo.test, ~30 shipments across
-      all statuses with valid event histories and real city coordinates; re-runnable. Replace the
-      README placeholder with the demo credentials.
-- [ ] Final Phase 1 docs pass (architecture, engineering notes) and all done criteria.
-
-Done:
-
-- `docs/architecture.md` (the spec).
-- Domain modules with unit tests: `src/domain/shipment-status.ts`, `src/domain/tracking-code.ts`
-  and their `*.test.ts` files, now running under Vitest.
-- `.env.example` (database URLs, Better Auth secret/URL) and the local database setup steps in it.
-
-Next (remaining Phase 1 scope, from the original brief):
-
-- [x] Scaffold Next.js with `pnpm create next-app@latest` (TypeScript, App Router, `src/`, Tailwind, ESLint)
-      into a temp dir, then move the files in, keeping `.gitignore` entries, README and docs.
-- [x] Tooling: TypeScript strict, ESLint, Prettier, Vitest, scripts `dev`, `build`, `lint`, `typecheck`,
-      `test`, `format`.
-- [x] DB scripts: `db:generate`, `db:migrate`, plus `auth:generate` (regenerates the Better Auth schema).
-- [x] `test:e2e` with Playwright `executablePath` (checkpoint 5b).
-- [ ] `db:seed` (checkpoint 6).
-- [x] Drizzle schema: Better Auth tables (user, session, account, verification, organization, member,
-      invitation), `shipments`, `shipment_events`, indexes for org-scoped listing and status filtering.
-- [x] Migration with a trigger that raises on UPDATE/DELETE (and TRUNCATE) of `shipment_events`.
-      Migrations committed in `src/server/db/migrations/`.
-- [x] Integration test project against `waybill_test`, with the append-only trigger tests.
-- [x] DB review fixes: migration 0002 (composite tenant FK on events, CHECK constraints) with tests;
-      lazy `getDb()` so importing the client needs no env vars.
-- [x] Better Auth: email/password + organization plugin, roles admin/dispatcher/driver; sign-up creates
-      a user plus a new org where they are admin; sign-in, sign-out; session helper returning
-      `AuthContext` or redirecting; protection for `/dashboard`. Pages are unstyled placeholders.
-- [x] Services in `src/server/services/`: `createShipment`, `listShipments` (pagination, status filter,
-      search by code or reference), `getShipment`, `changeShipmentStatus` (one transaction; result union
-      ok / invalid_transition / conflict / not_found), `getPublicTracking(code)` (safe projection only).
-      Drivers cannot create shipments in Phase 1.
-- [x] UI: `/`, `/sign-in`, `/sign-up`, `/dashboard/shipments` (table, filter, search, URL-param pagination),
-      `/dashboard/shipments/new` (Zod + Server Action, field errors), `/dashboard/shipments/[id]`
-      (details, timeline, status form with only allowed next statuses, conflict handling),
-      `/track/[code]` (public, `generateMetadata`, noindex, friendly not-found).
-- [ ] Seed: "Demo Freight Co", admin@/dispatcher@/driver@demo.test, ~30 shipments across all statuses
-      with valid event histories and real city coordinates; re-runnable.
-- [x] Integration tests against `waybill_test`: changeShipmentStatus (happy path, invalid transition,
-      stale version conflict, cross-org not_found) and the append-only trigger.
-- [x] Playwright happy path: signs up, creates a shipment, advances status, opens the public page.
-- [ ] README: features, stack, setup, scripts, docs links done; demo credentials in checkpoint 6.
-- [ ] Run all done criteria: lint, typecheck, test, build, test:e2e.
+1. **Driver app (`/driver`).** Mobile-first list of the driver's assigned shipments (reusing
+   `visibleShipments`) and a big-button status flow built on `statusOptionsFor("driver", ...)`;
+   role-based landing (drivers to `/driver`, staff to `/dashboard`). Dispatchers can reassign
+   drivers from the detail page (an `assignDriver` service with an event row).
+2. **Location pings.** `location_pings` table (org, shipment, driver, lat/lng, accuracy, recorded
+   and received times), a `recordLocationPing` service with Zod, driver-only and assigned-only,
+   throttled per driver; the driver app sends pings with the Geolocation API while a shipment is
+   active. Retention and indexing decided up front (latest ping per shipment is the hot query).
+3. **Live map.** MapLibre GL with OpenStreetMap tiles on the dashboard (all active shipments) and a
+   small map on the detail page; the public page shows city-level progress only (no exact
+   position), keeping the public projection rules.
+4. **Realtime via SSE.** A route handler streaming org-scoped events (status changes, pings) using
+   Postgres `LISTEN/NOTIFY`; the dashboard list, detail page and map update without reloads;
+   reconnect with `Last-Event-ID`. Check Vercel streaming limits and document the choice.
+5. **Truck simulator.** A script that drives seeded shipments along real routes (interpolated
+   between the seed's city coordinates), posting pings and status changes through the same
+   services, so the demo looks alive. Phase 2 e2e: a driver advances a shipment and the dashboard
+   updates live.
 
 ## Roadmap
 
-- **Phase 2:** driver app, location pings, live map (MapLibre + OpenStreetMap), realtime via SSE,
-  truck simulator.
+- **Phase 2 (next):** driver app, location pings, live map (MapLibre + OpenStreetMap), realtime
+  via SSE, truck simulator. Checkpoints above.
 - **Phase 3:** public API with API keys, signed and retried webhooks, email notifications via Resend,
   proof of delivery (photo + signature), AI intake of shipment request emails.
 - **Phase 4:** test coverage, CI with GitHub Actions, README with architecture diagram,
-  accessibility + Lighthouse pass, demo accounts, deploy to Vercel + Neon.
+  accessibility + Lighthouse pass, deploy to Vercel + Neon (demo accounts already exist via the
+  seed).
 
 ## Decisions and gotchas so far
 
@@ -278,6 +235,28 @@ drizzle-orm 0.45.4, drizzle-kit 0.31.11, pg 8.23, zod 4.6.7, @playwright/test 1.
 - **Killing a background server:** `pkill -f "next start"` also matches the shell running it and
   ends the command; find the PID by port (`ss -ltnp | grep 3200`) instead.
 
+### Seed and rate limiting (checkpoint 6)
+
+- **Seed through the services.** `seedDemo` (`src/server/seed/demo-seed.ts`) creates users with
+  Better Auth (`signUpWithOrganization` for the admin, `signUpEmail` + `addMember` for the others),
+  books shipments with `createShipment(ctx, input, { now })` (the injectable clock backdates the
+  booking) and replays history with `changeShipmentStatus` using backdated `occurredAt`. So the
+  state machine, role rules (drivers record their own shipments, the office cancels) and event
+  ordering are enforced exactly as in the app. A deterministic PRNG keeps the data stable.
+- **Re-runs:** a no-op once `admin@demo.test` exists (history cannot be deleted, so nothing is
+  refreshed). `pnpm db:seed --reset` wipes and re-migrates first and refuses any database not
+  named `waybill`. The reset helpers live in `src/server/db/maintenance.ts` (tooling only).
+- **`tsx --conditions=react-server`** makes `server-only` resolve to its empty export, so the seed
+  script can import services. Better Auth calls work outside a request (`nextCookies` is a no-op).
+- **Rate limits** (`src/server/auth/rate-limit.ts`): fixed windows in `auth_rate_limits`, one
+  atomic `INSERT ... ON CONFLICT DO UPDATE` per attempt. Attempts are counted **before** the
+  password check, so concurrent guesses cannot outrun the counter and unknown emails behave like
+  wrong passwords. A successful sign-in clears the per-account count only. Tests inject `now`;
+  Better Auth itself still uses real time.
+- **e2e and sign-up limits:** sign-up allows 10 per IP per hour, and every e2e run starts from a
+  wiped database, so the e2e sign-ups never hit it. Manual testing against the dev DB can; wait,
+  or `DELETE FROM auth_rate_limits`.
+
 ### Testing
 
 - `pnpm test` runs two Vitest projects: `unit` (`src/**/*.test.ts`) and `integration`
@@ -300,11 +279,15 @@ drizzle-orm 0.45.4, drizzle-kit 0.31.11, pg 8.23, zod 4.6.7, @playwright/test 1.
   failure the user is deleted again (compensation), but a crash between the two would leave an
   org-less user, who can sign in but gets redirected away from `/dashboard`.
 - Only one organization per user is supported in the UI (no org switcher).
-- **No rate limiting on sign-in/sign-up (security, fix by Phase 4).** The Server Actions call
-  `auth.api.*` directly, and Better Auth's built-in rate limiter only applies to requests through its
-  HTTP handler (`/api/auth/*`), not to server-side API calls. Sign-in is therefore open to password
-  guessing. Fix: a per-IP + per-email limiter in the actions (or route sign-in through the handler),
-  with an integration test.
+- **Rate-limit rows are never purged.** Expired windows are overwritten on the next attempt for
+  the same key, but keys that never come back stay. Add a periodic
+  `DELETE FROM auth_rate_limits WHERE window_start < now() - interval '1 day'` (cron) when deployed.
+- **The client IP trusts `x-forwarded-for`.** Correct behind Vercel or another proxy that sets it;
+  a self-hosted deployment without such a proxy lets clients choose their IP for the per-IP limits
+  (the per-account sign-in limit still holds per IP chosen). Documented in `client-ip.ts`.
+- **Seeded dates age.** The demo seed is a one-off; rerun `pnpm db:seed --reset` locally for fresh
+  "recent" dates. A hosted demo will need a scheduled reset (Phase 4).
+- `notFound()` on dynamic pages streams a 200 with `noindex` (see checkpoint 5b gotchas).
 - Sign-up says when an email is already registered (account enumeration). Accepted for now as a
   product choice; revisit with email verification in Phase 3 ("check your email" response).
 - An org-less user (see sign-up above) is sent to `/sign-in` while still signed in, which is

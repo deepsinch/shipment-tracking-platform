@@ -133,19 +133,19 @@ src/
 
 ## Commands
 
-| Script               | Purpose                                                                 |
-| -------------------- | ----------------------------------------------------------------------- |
-| `pnpm dev`           | Next.js dev server                                                      |
-| `pnpm build`         | Production build                                                        |
-| `pnpm lint`          | ESLint                                                                  |
-| `pnpm typecheck`     | `next typegen` then `tsc --noEmit` (typegen creates route prop types)   |
-| `pnpm test`          | Vitest: unit + integration (integration needs Postgres and `.env`)      |
-| `pnpm format:check`  | Prettier check (`pnpm format` to fix)                                   |
-| `pnpm db:generate`   | Generate a migration from the Drizzle schema                            |
-| `pnpm db:migrate`    | Apply migrations to `DATABASE_URL`                                      |
-| `pnpm auth:generate` | Regenerate Better Auth tables; must be a no-op on a clean tree          |
-| `pnpm test:e2e`      | Playwright: prepares `waybill_e2e`, builds, starts on :3100, runs specs |
-| `pnpm db:seed`       | Re-runnable demo seed, "Demo Freight Co" (added in checkpoint 6)        |
+| Script               | Purpose                                                                      |
+| -------------------- | ---------------------------------------------------------------------------- |
+| `pnpm dev`           | Next.js dev server                                                           |
+| `pnpm build`         | Production build                                                             |
+| `pnpm lint`          | ESLint                                                                       |
+| `pnpm typecheck`     | `next typegen` then `tsc --noEmit` (typegen creates route prop types)        |
+| `pnpm test`          | Vitest: unit + integration (integration needs Postgres and `.env`)           |
+| `pnpm format:check`  | Prettier check (`pnpm format` to fix)                                        |
+| `pnpm db:generate`   | Generate a migration from the Drizzle schema                                 |
+| `pnpm db:migrate`    | Apply migrations to `DATABASE_URL`                                           |
+| `pnpm auth:generate` | Regenerate Better Auth tables; must be a no-op on a clean tree               |
+| `pnpm test:e2e`      | Playwright: prepares `waybill_e2e`, builds, starts on :3100, runs specs      |
+| `pnpm db:seed`       | Demo seed "Demo Freight Co"; no-op if present, `--reset` recreates `waybill` |
 
 Done criteria for every checkpoint: format:check, lint, typecheck, test, build and test:e2e all pass,
 with a clean tree.

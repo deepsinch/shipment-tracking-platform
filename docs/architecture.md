@@ -27,12 +27,16 @@ It is updated at the end of every phase.
 ```
 src/
   app/                 routes only: pages, layouts, route handlers, server actions wiring
-  domain/              pure business logic, no I/O (status machine, tracking codes)
+  domain/              pure business logic, no I/O (status machine, permissions, tracking codes)
+  lib/                 small shared helpers (formatting, form data)
   server/
-    db/                drizzle schema, client, migrations
+    db/                drizzle schema, client, migrations, maintenance (tooling only)
     services/          use cases: auth check -> validation -> transaction -> result
-    auth/              Better Auth config and session helpers
+    auth/              Better Auth config, session helpers, sign-in/sign-up with rate limits
+    seed/              demo data, built on the services
   components/          UI components
+scripts/               CLI entry points (seed)
+tests/                 integration fixtures and setup, Playwright specs
 ```
 
 Rule: route files stay thin. They call a service; services own authorization and transactions.
@@ -61,6 +65,21 @@ ISO-2 country codes, status changes with a target status) complement Zod validat
   require an `AuthContext` argument and filter by its organization.
 - Better Auth owns membership and org settings permissions (only admins manage the org). Shipment
   permissions are domain rules enforced in services.
+- **Rate limits.** Our Server Actions call `auth.api.*` directly, which bypasses Better Auth's
+  HTTP-level limiter, so sign-in and sign-up have their own: fixed-window counters in Postgres
+  (`auth_rate_limits`, keys hashed). Sign-in allows 5 attempts per email + IP per 15 minutes
+  (cleared by a successful sign-in) and 30 per IP; sign-up allows 10 submissions per IP per hour.
+  Attempts are counted atomically before the password is checked, so parallel guesses cannot
+  outrun the counter and the response never reveals whether an email exists. The client IP is the
+  first `x-forwarded-for` hop, trusting the platform proxy.
+
+## Demo data
+
+`pnpm db:seed` creates "Demo Freight Co" with an admin, a dispatcher and a driver, and 30 shipments
+across every status. It uses only the application's own paths: Better Auth for accounts,
+`createShipment` (with an injectable clock to backdate bookings) and `changeShipmentStatus` for
+history, so seeded timelines obey the same state machine, role and ordering rules as real ones.
+History cannot be deleted, so a re-run is a no-op; `--reset` re-creates the local dev database.
 
 ## Shipment access
 
@@ -179,15 +198,17 @@ people who hold the code. Unknown and malformed codes get the same not-found pag
 
 ## Decisions log
 
-| #   | Decision                                                            | Why                                                                                              | Alternatives considered                                                           |
-| --- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------- |
-| 1   | Append-only events + status projection                              | Audit trail and customer timeline from one source of truth                                       | Status column only (loses history)                                                |
-| 2   | Optimistic concurrency via version column                           | No locks held across user think-time, conflicts are explicit                                     | `SELECT ... FOR UPDATE` (fine inside one request, but does not catch stale forms) |
-| 3   | State machine in pure TS                                            | Unit testable, shared by UI (only show allowed buttons) and server (enforce)                     | DB check constraints (cannot express transitions cleanly)                         |
-| 4   | Org from session, never from input                                  | Prevents cross-tenant access by construction                                                     | Passing org id in URLs                                                            |
-| 5   | Better Auth with organization plugin                                | Orgs, members and roles out of the box, Drizzle adapter                                          | Auth.js (no built-in orgs), Clerk (hosted, vendor lock-in)                        |
-| 6   | Integration tests against a real Postgres, re-migrated per run      | Triggers, enums, FKs and transactions are what we need to prove; mocks or SQLite cannot run them | Mocked DB layer, pg-mem, Testcontainers (no Docker here)                          |
-| 7   | Tenant consistency enforced by a composite FK                       | Makes a cross-org event impossible even with an application bug                                  | App-level checks only; a trigger                                                  |
-| 8   | Role read from the membership row per request                       | Demotions and removals take effect immediately                                                   | Role cached in the session or a JWT (stale until expiry)                          |
-| 9   | Driver scope as a shared `WHERE` helper, out-of-scope = not found   | One place for tenant and role scoping; drivers cannot probe which shipments exist                | Per-service checks after loading the row; `forbidden` for drivers                 |
-| 10  | Tracking code retry via `ON CONFLICT DO NOTHING` in the transaction | A unique violation would abort the transaction; this avoids savepoints and error-code parsing    | Catch `23505` and retry the whole transaction; savepoint per attempt              |
+| #   | Decision                                                            | Why                                                                                                | Alternatives considered                                                                                                    |
+| --- | ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Append-only events + status projection                              | Audit trail and customer timeline from one source of truth                                         | Status column only (loses history)                                                                                         |
+| 2   | Optimistic concurrency via version column                           | No locks held across user think-time, conflicts are explicit                                       | `SELECT ... FOR UPDATE` (fine inside one request, but does not catch stale forms)                                          |
+| 3   | State machine in pure TS                                            | Unit testable, shared by UI (only show allowed buttons) and server (enforce)                       | DB check constraints (cannot express transitions cleanly)                                                                  |
+| 4   | Org from session, never from input                                  | Prevents cross-tenant access by construction                                                       | Passing org id in URLs                                                                                                     |
+| 5   | Better Auth with organization plugin                                | Orgs, members and roles out of the box, Drizzle adapter                                            | Auth.js (no built-in orgs), Clerk (hosted, vendor lock-in)                                                                 |
+| 6   | Integration tests against a real Postgres, re-migrated per run      | Triggers, enums, FKs and transactions are what we need to prove; mocks or SQLite cannot run them   | Mocked DB layer, pg-mem, Testcontainers (no Docker here)                                                                   |
+| 7   | Tenant consistency enforced by a composite FK                       | Makes a cross-org event impossible even with an application bug                                    | App-level checks only; a trigger                                                                                           |
+| 8   | Role read from the membership row per request                       | Demotions and removals take effect immediately                                                     | Role cached in the session or a JWT (stale until expiry)                                                                   |
+| 9   | Driver scope as a shared `WHERE` helper, out-of-scope = not found   | One place for tenant and role scoping; drivers cannot probe which shipments exist                  | Per-service checks after loading the row; `forbidden` for drivers                                                          |
+| 10  | Tracking code retry via `ON CONFLICT DO NOTHING` in the transaction | A unique violation would abort the transaction; this avoids savepoints and error-code parsing      | Catch `23505` and retry the whole transaction; savepoint per attempt                                                       |
+| 11  | Rate limits as fixed-window counters in Postgres                    | Shared by every serverless instance; one atomic upsert per attempt; no new infrastructure          | In-memory (resets per instance and cold start), Redis/Upstash (extra service), sliding window (more state for little gain) |
+| 12  | Seed through the services, skip if present                          | Seed data can never violate rules the app enforces, and the seed breaks loudly if the rules change | Raw SQL inserts (can drift from the rules), truncate and reseed (history cannot be deleted)                                |
