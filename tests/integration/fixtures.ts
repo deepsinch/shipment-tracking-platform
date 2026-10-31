@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 
+import type { Role } from "@/domain/roles";
 import { generateTrackingCode } from "@/domain/tracking-code";
+import type { AuthContext } from "@/server/auth/auth-context";
 import { getDb } from "@/server/db/client";
 import { member, organization, shipmentEvents, shipments, user } from "@/server/db/schema";
 import type { NewShipment, Shipment } from "@/server/db/schema";
@@ -19,10 +21,7 @@ export async function createTestOrganization(name = "Test Org") {
   return org!;
 }
 
-export async function createTestUser(
-  organizationId: string,
-  role: "admin" | "dispatcher" | "driver" = "dispatcher",
-) {
+export async function createTestUser(organizationId: string, role: Role = "dispatcher") {
   const id = randomUUID();
   const [created] = await getDb()
     .insert(user)
@@ -32,6 +31,15 @@ export async function createTestUser(
     .insert(member)
     .values({ id: randomUUID(), organizationId, userId: id, role, createdAt: new Date() });
   return created!;
+}
+
+/** A new member of the organization, as the AuthContext services receive for them. */
+export async function createTestContext(
+  organizationId: string,
+  role: Role = "dispatcher",
+): Promise<AuthContext> {
+  const created = await createTestUser(organizationId, role);
+  return { userId: created.id, organizationId, role };
 }
 
 /** Inserts a shipment plus its `created` event, like the real service does. */
