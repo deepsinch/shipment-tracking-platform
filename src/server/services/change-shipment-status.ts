@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, eq, max, sql } from "drizzle-orm";
+import { and, eq, isNotNull, max, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { canSetStatus } from "@/domain/shipment-permissions";
@@ -70,8 +70,10 @@ export type ChangeShipmentStatusResult =
  * only shipments assigned to them, and never to `cancelled` (forbidden, see `canSetStatus`).
  * Shipments outside the caller's scope are not found, so a driver cannot learn which exist.
  *
- * `occurredAt` may be backdated, but not before the shipment's latest event, so the timeline
- * (ordered by occurred_at) always follows the state machine.
+ * `occurredAt` may be backdated, but not before the shipment's latest status event, so the status
+ * timeline (ordered by occurred_at) always follows the state machine. Events without a status
+ * (driver assignments) do not count: a driver who was offline may record a pickup that happened
+ * before the office reassigned the shipment to them.
  */
 export async function changeShipmentStatus(
   ctx: AuthContext,
@@ -101,7 +103,7 @@ export async function changeShipmentStatus(
 
     // Read inside the transaction: a concurrent change that adds a later event also bumps the
     // version, so the guarded UPDATE below rejects us and this check cannot go stale.
-    const latestOccurredAt = await latestEventTime(tx, ctx, shipmentId);
+    const latestOccurredAt = await latestStatusEventTime(tx, ctx, shipmentId);
     if (occurredAt && latestOccurredAt && occurredAt < latestOccurredAt) {
       return {
         ok: false,
@@ -174,7 +176,8 @@ async function findVisibleShipment(
   return shipment;
 }
 
-async function latestEventTime(
+/** When the shipment's latest status event (created or status_changed) happened. */
+async function latestStatusEventTime(
   tx: Transaction,
   ctx: AuthContext,
   shipmentId: string,
@@ -186,6 +189,7 @@ async function latestEventTime(
       and(
         eq(shipmentEvents.shipmentId, shipmentId),
         eq(shipmentEvents.organizationId, ctx.organizationId),
+        isNotNull(shipmentEvents.toStatus),
       ),
     );
   return row?.latest ?? null;

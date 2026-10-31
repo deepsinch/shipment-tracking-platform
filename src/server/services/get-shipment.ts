@@ -1,8 +1,9 @@
 import "server-only";
 
-import { and, asc, eq, getTableColumns } from "drizzle-orm";
+import { and, asc, eq, getTableColumns, inArray } from "drizzle-orm";
 import { z } from "zod";
 
+import { driverAssignmentOf } from "@/domain/shipment-event";
 import type { AuthContext } from "@/server/auth/auth-context";
 import { getDb } from "@/server/db/client";
 import {
@@ -16,8 +17,13 @@ import {
 import { notFound, type NotFound } from "./results";
 import { visibleShipments } from "./shipment-access";
 
-/** A history event with the name of the person who recorded it (null for system events). */
-export type ShipmentEventWithActor = ShipmentEvent & { actorName: string | null };
+/** A history event with the names of the people involved. */
+export type ShipmentEventWithActor = ShipmentEvent & {
+  /** Who recorded it; null for system events. */
+  actorName: string | null;
+  /** For `driver_assigned` events, the old and new drivers' names (null = no driver). */
+  assignment: { fromName: string | null; toName: string | null } | null;
+};
 
 export type ShipmentDetail = {
   shipment: Shipment;
@@ -51,7 +57,7 @@ export async function getShipment(ctx: AuthContext, id: string): Promise<GetShip
   if (!row) return notFound;
   const { shipment, assignedDriverName } = row;
 
-  const events = await db
+  const rows = await db
     .select({ ...getTableColumns(shipmentEvents), actorName: user.name })
     .from(shipmentEvents)
     .leftJoin(user, eq(user.id, shipmentEvents.actorUserId))
@@ -66,5 +72,31 @@ export async function getShipment(ctx: AuthContext, id: string): Promise<GetShip
     // Real-world order; recorded_at breaks ties between events with the same occurred_at.
     .orderBy(asc(shipmentEvents.occurredAt), asc(shipmentEvents.recordedAt));
 
+  const names = await driverNamesOf(rows);
+  const nameOf = (id: string | null) => (id ? (names.get(id) ?? null) : null);
+  const events = rows.map((event): ShipmentEventWithActor => {
+    if (event.type !== "driver_assigned") return { ...event, assignment: null };
+    const { fromDriverId, toDriverId } = driverAssignmentOf(event.metadata);
+    return { ...event, assignment: { fromName: nameOf(fromDriverId), toName: nameOf(toDriverId) } };
+  });
+
   return { ok: true, shipment, assignedDriverName, events };
+}
+
+/** Names of the drivers mentioned by `driver_assigned` events, in one query. */
+async function driverNamesOf(events: ShipmentEvent[]): Promise<Map<string, string>> {
+  const ids = new Set<string>();
+  for (const event of events) {
+    if (event.type !== "driver_assigned") continue;
+    const { fromDriverId, toDriverId } = driverAssignmentOf(event.metadata);
+    if (fromDriverId) ids.add(fromDriverId);
+    if (toDriverId) ids.add(toDriverId);
+  }
+  if (ids.size === 0) return new Map();
+
+  const people = await getDb()
+    .select({ id: user.id, name: user.name })
+    .from(user)
+    .where(inArray(user.id, [...ids]));
+  return new Map(people.map((person) => [person.id, person.name]));
 }

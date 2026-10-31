@@ -1,5 +1,5 @@
 import type { Role } from "./roles";
-import { allowedNextStatuses, type ShipmentStatus } from "./shipment-status";
+import { allowedNextStatuses, isTerminalStatus, type ShipmentStatus } from "./shipment-status";
 
 /**
  * Shipment permissions by role. Pure rules, enforced by the services in `src/server/services/`
@@ -20,6 +20,15 @@ export function canCreateShipments(role: Role): boolean {
 /** Whether the role may assign drivers to shipments (and so list the organization's drivers). */
 export function canAssignDrivers(role: Role): boolean {
   return role === "admin" || role === "dispatcher";
+}
+
+/**
+ * Whether a shipment in `status` may get a different driver. Not once it is delivered or
+ * cancelled: the driver of a finished job is part of its record, and reassigning it would hand
+ * the shipment's history to someone who never carried it.
+ */
+export function canChangeDriver(status: ShipmentStatus): boolean {
+  return !isTerminalStatus(status);
 }
 
 /** True when the role sees every shipment in its organization, false when only assigned ones. */

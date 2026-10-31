@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { ROLES, type Role } from "./roles";
 import {
   canAssignDrivers,
+  canChangeDriver,
   canCreateShipments,
   canSetStatus,
   seesAllOrganizationShipments,
@@ -53,6 +54,14 @@ describe("shipment permissions", () => {
 
     it("offers nothing from a terminal status", () => {
       expect(statusOptionsFor("admin", "delivered")).toEqual([]);
+    });
+  });
+
+  describe("canChangeDriver", () => {
+    it("allows a new driver until the shipment is delivered or cancelled", () => {
+      for (const status of SHIPMENT_STATUSES) {
+        expect(canChangeDriver(status)).toBe(status !== "delivered" && status !== "cancelled");
+      }
     });
   });
 });
