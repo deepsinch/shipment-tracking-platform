@@ -5,21 +5,24 @@ import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { Pool } from "pg";
 
 /**
- * Database preparation shared by the integration tests (`*_test`) and the end-to-end tests
- * (`*_e2e`). Both wipe their database, so both refuse any database without a throwaway suffix.
+ * Database maintenance for tooling only (test setups, the demo seed's reset), never imported by
+ * the app. Callers that wipe a database must first check its name with `assertDatabaseName`.
  */
 
-const MIGRATIONS_FOLDER = path.resolve(import.meta.dirname, "../../src/server/db/migrations");
+const MIGRATIONS_FOLDER = path.resolve(import.meta.dirname, "migrations");
 
 export function databaseName(url: string): string {
   return decodeURIComponent(new URL(url).pathname.replace(/^\//, ""));
 }
 
-export function assertThrowawayDatabase(url: string, suffix: "_test" | "_e2e"): void {
+/** Throws unless the database name passes `allowed`, described by `rule` in the message. */
+export function assertDatabaseName(
+  url: string,
+  allowed: (name: string) => boolean,
+  rule: string,
+): void {
   const name = databaseName(url);
-  if (!name.endsWith(suffix)) {
-    throw new Error(`Refusing to reset "${name}": the database name must end in ${suffix}.`);
-  }
+  if (!allowed(name)) throw new Error(`Refusing to reset "${name}": ${rule}.`);
 }
 
 /** Creates the database if it does not exist yet, connecting to the `postgres` maintenance DB. */

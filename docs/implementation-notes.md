@@ -271,7 +271,7 @@ drizzle-orm 0.45.4, drizzle-kit 0.31.11, pg 8.23, zod 4.6.7, @playwright/test 1.
   another database is never reused. The e2e app runs on :3100 with `BETTER_AUTH_URL` to match.
 - **e2e database:** `E2E_DATABASE_URL` (in `.env`, see `.env.example`); the name must end in `_e2e`.
   It is created on first run (the `waybill` role has `CREATEDB`), then wiped and migrated every
-  run. The reset code is shared with the integration setup (`tests/support/database.ts`).
+  run. The reset code is shared with the integration setup (`src/server/db/maintenance.ts`, also used by `db:seed --reset`).
 - **e2e locators:** `getByRole` / `getByLabel` skip the hidden previous route; fieldsets give the
   two address blocks a `group` role (scope "Country code" to `Pickup` / `Delivery`). Form messages
   use `data-testid` (`form-alert`, `form-status`) because of the route announcer's role alert.

@@ -1,4 +1,4 @@
-import { resetDatabase } from "../support/database";
+import { resetDatabase } from "../../src/server/db/maintenance";
 import { testDatabaseUrl } from "./test-database";
 
 /**

@@ -3,11 +3,15 @@
  * e2e database if needed, then wipes and migrates it. It runs before `next build && next start`,
  * so the app never sees a half-migrated database.
  */
-import { assertThrowawayDatabase, ensureDatabaseExists, resetDatabase } from "../support/database";
+import {
+  assertDatabaseName,
+  ensureDatabaseExists,
+  resetDatabase,
+} from "../../src/server/db/maintenance";
 
 const url = process.env.DATABASE_URL;
 if (!url) throw new Error("DATABASE_URL is not set (playwright.config.ts sets it).");
-assertThrowawayDatabase(url, "_e2e");
+assertDatabaseName(url, (name) => name.endsWith("_e2e"), "the database name must end in _e2e");
 
 try {
   await ensureDatabaseExists(url);
