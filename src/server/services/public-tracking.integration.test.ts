@@ -11,14 +11,16 @@ import {
 import { assignDriver } from "./assign-driver";
 import { changeShipmentStatus } from "./change-shipment-status";
 import { getPublicTracking, type PublicTracking } from "./public-tracking";
+import { recordLocationPing } from "./record-location-ping";
 
 describe("getPublicTracking", () => {
   let shipment: Shipment;
   let driverId: string;
   let secondDriverId: string;
+  let orgId: string;
 
   beforeAll(async () => {
-    const orgId = (await createTestOrganization()).id;
+    orgId = (await createTestOrganization()).id;
     const dispatcher = await createTestContext(orgId, "dispatcher");
     const driver = await createTestContext(orgId, "driver");
     driverId = driver.userId;
@@ -148,5 +150,28 @@ describe("getPublicTracking", () => {
     expect(await getPublicTracking(generateTrackingCode())).toBeNull();
     expect(await getPublicTracking("not a code")).toBeNull();
     expect(await getPublicTracking("")).toBeNull();
+  });
+
+  // Exact coordinates are never public (docs/architecture.md, "Public projection rules").
+  it("is unchanged by location pings, which never expose coordinates", async () => {
+    const before = await track(shipment.trackingCode);
+
+    const pinged = await recordLocationPing(
+      { userId: secondDriverId, organizationId: orgId, role: "driver" },
+      {
+        shipmentId: shipment.id,
+        lat: 51.234567,
+        lng: 4.765432,
+        accuracyM: 7,
+        recordedAt: new Date(),
+      },
+    );
+    expect(pinged).toMatchObject({ ok: true, accepted: true });
+
+    const after = await track(shipment.trackingCode);
+    expect(after).toEqual(before);
+    const serialized = JSON.stringify(after);
+    expect(serialized).not.toContain("51.234567");
+    expect(serialized).not.toContain("4.765432");
   });
 });
