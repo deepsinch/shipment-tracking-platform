@@ -8,7 +8,7 @@ It is a portfolio project, built to production standards: a strict state machine
 history enforced by the database, optimistic concurrency, multi-tenant isolation, and tests against
 a real Postgres.
 
-## Features so far (Phase 1, in progress)
+## Features (Phase 1)
 
 - **Accounts and companies:** sign up creates a company workspace with you as admin. Roles: admin,
   dispatcher, driver.
@@ -21,9 +21,11 @@ a real Postgres.
   changed the shipment first, you see what changed and can retry, instead of silently overwriting.
 - **Public tracking page:** mobile-first status, progress, route and timeline. Never shows
   addresses, internal notes or staff names; not indexed by search engines.
+- **Secure by default:** every query is scoped to your company, history is append-only in the
+  database, and sign-in and sign-up are rate limited.
 
-Coming next: a demo seed with ready-made accounts, then a driver app, live map, public API and
-webhooks (see the roadmap in [docs/implementation-notes.md](docs/implementation-notes.md)).
+Next up (Phase 2): a driver app, live location on a map and realtime updates (see the roadmap in
+[docs/implementation-notes.md](docs/implementation-notes.md)).
 
 ## Stack
 
@@ -48,11 +50,29 @@ Prerequisites: Node 22, pnpm 10, PostgreSQL 16.
 
 3. Configure the environment: `cp .env.example .env`, then set `BETTER_AUTH_SECRET`
    (`openssl rand -base64 32`).
-4. Apply migrations: `pnpm db:migrate`
-5. Start the app: `pnpm dev`, open http://localhost:3000 and create an account.
+4. Apply migrations and load the demo data: `pnpm db:migrate && pnpm db:seed`
+5. Start the app: `pnpm dev` and open http://localhost:3000
 
-> **Demo data:** a re-runnable seed ("Demo Freight Co") with demo accounts for each role arrives
-> with the next checkpoint. Until then, sign up to create your own company.
+## Try it
+
+The seed creates **Demo Freight Co** with 30 shipments in every status. All demo accounts use the
+password `demo-password` (demo only):
+
+| Account                | Role       | What to try                                                    |
+| ---------------------- | ---------- | -------------------------------------------------------------- |
+| `admin@demo.test`      | Admin      | Everything a dispatcher can do                                 |
+| `dispatcher@demo.test` | Dispatcher | Create a shipment, assign the driver, move it through statuses |
+| `driver@demo.test`     | Driver     | Sees only the shipments assigned to them; cannot cancel        |
+
+1. Sign in as the dispatcher, open a shipment and change its status with a customer note and an
+   internal note.
+2. Click **Public tracking page**: the customer sees the note, never the internal one.
+3. Open the same shipment in two tabs and change it in both: the second tab explains the conflict
+   instead of overwriting.
+4. Sign in as the driver to see the restricted view.
+
+The seed runs once (a re-run is a no-op, because history is never deleted). For fresh dates, run
+`pnpm db:seed --reset`, which wipes and re-creates the local `waybill` database only.
 
 ### Tests
 
@@ -77,6 +97,7 @@ Prerequisites: Node 22, pnpm 10, PostgreSQL 16.
 | `pnpm test:e2e`      | Playwright end-to-end tests against a production build     |
 | `pnpm db:generate`   | Generate a migration from the Drizzle schema               |
 | `pnpm db:migrate`    | Apply migrations to `DATABASE_URL`                         |
+| `pnpm db:seed`       | Load the demo data (`--reset` recreates the dev database)  |
 | `pnpm auth:generate` | Regenerate the Better Auth tables (must be a no-op change) |
 
 ## Documentation
