@@ -656,6 +656,10 @@ import.meta.url).href)` makes Turbopack emit the worker to `/_next/static/media/
   fixture, and the map already credits OpenStreetMap. Re-fetching depends on the donated demo
   server's goodwill: keep it a rare, one-off run.
 
+- **`changeShipmentStatus` has no injectable clock.** It checks event times against the real clock,
+  so the simulator integration test starts its clock an hour in the past. Add `deps.now` (as in
+  `createShipment` and `recordLocationPing`) early in Phase 3.
+
 ## Environment notes
 
 - Node 22, pnpm 10. Global `tsc` 6.0.2 and Playwright 1.63.0 exist under `/opt/node22`, but project

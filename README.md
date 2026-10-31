@@ -133,6 +133,13 @@ The seed runs once (a re-run is a no-op, because history is never deleted). For 
 | `pnpm simulate`      | Drive the demo trucks so the live map moves (dev DB only)  |
 | `pnpm routes:fetch`  | One-off: re-fetch the committed road route fixture (OSRM)  |
 
+## Credits
+
+- Map data and road route geometry © [OpenStreetMap](https://www.openstreetmap.org/copyright)
+  contributors, available under the Open Database License (ODbL).
+- Map tiles by [OpenFreeMap](https://openfreemap.org/) (OpenMapTiles schema).
+- Road routes were computed once with [OSRM](https://project-osrm.org/) and committed as fixtures.
+
 ## Documentation
 
 - [Architecture](docs/architecture.md): system design, state machine, multi-tenancy, decisions log.
