@@ -42,8 +42,14 @@ src/
 
 - The main session acts as architect and reviewer.
 - Implementation is delegated to an Opus subagent at medium effort.
-- One branch per phase (`phase-N-<name>`), small logical commits, PR to `main` after review.
-- The implementor commits locally; the architect reviews, then pushes.
+- One branch per phase (`phase-N-<name>`), small logical commits.
+- Work is split into checkpoints (listed in `docs/implementation-notes.md`). The implementor finishes one
+  checkpoint with all checks green and a clean tree, commits, stops and reports. It never pushes.
+- The architect reviews each checkpoint, pushes, and confirms on GitHub that new commits are Verified.
+- At the end of a phase the architect opens the PR to `main` and merges it after review; no need to ask the user.
+- Interview material: each checkpoint report names one notable problem and the alternatives considered.
+  The architect records these in `docs/engineering-notes.md` (problem, approach, tradeoffs, at scale,
+  likely questions) and keeps the user's private prep doc in sync.
 
 ## Commits
 
