@@ -31,8 +31,14 @@ export const getShipmentPositionsSchema = z.object({
 
 export type GetShipmentPositionsInput = z.input<typeof getShipmentPositionsSchema>;
 
-/** A shipment's latest known position, with what a map marker needs to label it. */
-export type ShipmentPositionSnapshot = Pick<Shipment, "trackingCode" | "status"> &
+/**
+ * A shipment's latest known position, with what a map marker needs to label it (tracking code,
+ * status, where it is going).
+ */
+export type ShipmentPositionSnapshot = Pick<
+  Shipment,
+  "trackingCode" | "status" | "destinationCity" | "destinationCountry"
+> &
   Pick<ShipmentPosition, "shipmentId" | "lat" | "lng" | "accuracyM" | "recordedAt" | "driverId">;
 
 export type GetShipmentPositionsResult =
@@ -63,6 +69,8 @@ export async function getShipmentPositions(
       shipmentId: shipmentPositions.shipmentId,
       trackingCode: shipments.trackingCode,
       status: shipments.status,
+      destinationCity: shipments.destinationCity,
+      destinationCountry: shipments.destinationCountry,
       lat: shipmentPositions.lat,
       lng: shipmentPositions.lng,
       accuracyM: shipmentPositions.accuracyM,
