@@ -2,15 +2,12 @@
 
 import { useState } from "react";
 
+import { newerFix, type Fix } from "@/lib/live-positions";
+
 import { useRealtime } from "./realtime-provider";
 
 /** A shipment's latest known position; `recordedAt` is the device time, ISO 8601. */
-export type LivePosition = { lat: number; lng: number; recordedAt: string };
-
-const newer = (a: LivePosition | null, b: LivePosition | null) => {
-  if (!a || !b) return a ?? b;
-  return Date.parse(b.recordedAt) > Date.parse(a.recordedAt) ? b : a;
-};
+export type LivePosition = Fix;
 
 /**
  * The shipment's position, starting from the server-rendered snapshot (`initial`, from
@@ -26,8 +23,8 @@ export function useLivePosition(
   useRealtime((event) => {
     if (event.kind !== "position" || event.shipmentId !== shipmentId) return;
     const position = { lat: event.lat, lng: event.lng, recordedAt: event.recordedAt };
-    setLive((current) => newer(current, position));
+    setLive((current) => newerFix(current, position));
   });
 
-  return newer(initial, live);
+  return newerFix(initial, live);
 }

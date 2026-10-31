@@ -25,6 +25,10 @@ describe("format", () => {
     expect(formatElapsed(12_400)).toBe("12 s ago");
     expect(formatElapsed(59_999)).toBe("59 s ago");
     expect(formatElapsed(185_000)).toBe("3 min ago");
+    expect(formatElapsed(59 * 60_000 + 59_999)).toBe("59 min ago");
+    expect(formatElapsed(60 * 60_000)).toBe("1 h ago");
+    expect(formatElapsed(23 * 3_600_000 + 3_599_999)).toBe("23 h ago");
+    expect(formatElapsed(50 * 3_600_000)).toBe("2 d ago");
     // A slightly fast client clock never shows a negative time.
     expect(formatElapsed(-2_000)).toBe("just now");
   });

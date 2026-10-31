@@ -2,9 +2,7 @@
 
 import { useLivePosition, type LivePosition } from "@/components/realtime/use-live-position";
 import { formatDateTime } from "@/lib/format";
-
-/** "51.2194, 4.4025": about 10 m of precision, plenty for "where is the truck". */
-const formatCoordinates = ({ lat, lng }: LivePosition) => `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+import { formatCoordinates } from "@/lib/geo";
 
 /**
  * Where the shipment's driver last reported it, kept current by realtime position events. Not a
