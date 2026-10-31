@@ -3,6 +3,10 @@
 import Link from "next/link";
 import { useActionState } from "react";
 
+import { FormAlert } from "@/components/form-alert";
+import { TextField } from "@/components/form-field";
+import { Button } from "@/components/ui/button";
+
 import { signUpAction, type SignUpState } from "../actions";
 
 const FIELDS = [
@@ -14,35 +18,35 @@ const FIELDS = [
 
 export function SignUpForm() {
   const [state, action, pending] = useActionState<SignUpState, FormData>(signUpAction, {});
+  const hasErrors = Boolean(state.formError || state.fieldErrors);
 
   return (
-    <form action={action} className="flex flex-col gap-3">
-      {FIELDS.map((field) => {
-        const errors = state.fieldErrors?.[field.name];
-        const errorId = `${field.name}-error`;
-        return (
-          <label key={field.name} className="flex flex-col gap-1">
-            {field.label}
-            <input
-              name={field.name}
-              type={field.type}
-              autoComplete={field.autoComplete}
-              required
-              defaultValue={field.type === "password" ? undefined : state.values?.[field.name]}
-              aria-invalid={errors ? true : undefined}
-              aria-describedby={errors ? errorId : undefined}
-              className="border p-2"
-            />
-            {errors && <span id={errorId}>{errors[0]}</span>}
-          </label>
-        );
-      })}
-      {state.formError && <p role="alert">{state.formError}</p>}
-      <button type="submit" disabled={pending} className="border p-2">
+    <form action={action} className="flex flex-col gap-4">
+      {hasErrors && (
+        <FormAlert title={state.formError ?? "Please correct the highlighted fields."} />
+      )}
+      {FIELDS.map((field) => (
+        <TextField
+          key={field.name}
+          name={field.name}
+          label={field.label}
+          type={field.type}
+          autoComplete={field.autoComplete}
+          required
+          description={field.type === "password" ? "At least 8 characters." : undefined}
+          // Passwords are never echoed back after a failed submission.
+          defaultValue={field.type === "password" ? undefined : state.values?.[field.name]}
+          errors={state.fieldErrors?.[field.name]}
+        />
+      ))}
+      <Button type="submit" disabled={pending}>
         {pending ? "Creating account…" : "Create account"}
-      </button>
-      <p>
-        Already have an account? <Link href="/sign-in">Sign in</Link>
+      </Button>
+      <p className="text-center text-sm text-muted-foreground">
+        Already have an account?{" "}
+        <Link href="/sign-in" className="font-medium text-foreground underline underline-offset-4">
+          Sign in
+        </Link>
       </p>
     </form>
   );
