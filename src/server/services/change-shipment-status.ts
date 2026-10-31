@@ -18,6 +18,7 @@ import {
   type NotFound,
   type ValidationFailure,
 } from "./results";
+import { announceShipmentChange } from "./realtime-signals";
 import { visibleShipments } from "./shipment-access";
 import { blankToUndefined, optionalCoordinate, optionalText } from "./validation";
 
@@ -58,8 +59,8 @@ export type ChangeShipmentStatusResult =
   | ValidationFailure;
 
 /**
- * Moves a shipment to a new status: state machine check, optimistic concurrency on `version`, and
- * the `status_changed` history event, all in one transaction.
+ * Moves a shipment to a new status: state machine check, optimistic concurrency on `version`, the
+ * `status_changed` history event and the realtime announcement, all in one transaction.
  *
  * Who may change what (Phase 1): admins and dispatchers any shipment in their organization, drivers
  * only shipments assigned to them, and never to `cancelled` (forbidden, see `canSetStatus`).
@@ -154,6 +155,7 @@ export async function changeShipmentStatus(
         internalNote,
       })
       .returning();
+    await announceShipmentChange(tx, updated, "status");
 
     return { ok: true, shipment: updated, event: event! };
   });

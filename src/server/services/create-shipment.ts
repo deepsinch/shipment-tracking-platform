@@ -10,6 +10,7 @@ import { getDb, type Transaction } from "@/server/db/client";
 import { shipmentEvents, shipments, type Shipment } from "@/server/db/schema";
 
 import { isDriverInOrganization, NOT_AN_ORGANIZATION_DRIVER } from "./driver-membership";
+import { announceShipmentChange } from "./realtime-signals";
 import { forbidden, validationFailure, type Forbidden, type ValidationFailure } from "./results";
 import { blankToUndefined, optionalCoordinate, optionalText } from "./validation";
 
@@ -77,7 +78,7 @@ const MAX_TRACKING_CODE_ATTEMPTS = 5;
 
 /**
  * Books a new shipment: inserts it with a fresh tracking code plus its `created` history event, in
- * one transaction. Admins and dispatchers only.
+ * one transaction that also announces it on the realtime bus. Admins and dispatchers only.
  */
 export async function createShipment(
   ctx: AuthContext,
@@ -119,6 +120,7 @@ export async function createShipment(
       occurredAt: created.createdAt,
       actorUserId: ctx.userId,
     });
+    await announceShipmentChange(tx, created, "created");
     return created;
   });
 

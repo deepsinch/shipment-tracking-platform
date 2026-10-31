@@ -22,6 +22,7 @@ import {
   type NotFound,
   type ValidationFailure,
 } from "./results";
+import { announcePosition } from "./realtime-signals";
 import { visibleShipments } from "./shipment-access";
 
 /**
@@ -86,6 +87,9 @@ export type RecordLocationPingDeps = {
  * A late ping (device time older than the stored position, e.g. delivered out of order after a
  * reconnect) is stored and counts for the throttle, but the CASE expressions keep the newer
  * position. `shipments.version` is never touched: telemetry must not turn open status forms stale.
+ *
+ * A ping that moves the position is announced on the realtime bus in the same transaction; a
+ * throttled or late one is not.
  */
 export async function recordLocationPing(
   ctx: AuthContext,
@@ -175,11 +179,19 @@ export async function recordLocationPing(
       })
       .returning();
 
-    return {
-      ok: true,
-      accepted: true,
-      ping: ping!,
-      positionMoved: position.recordedAt.getTime() === recordedAt.getTime(),
-    };
+    const positionMoved = position.recordedAt.getTime() === recordedAt.getTime();
+    // A late ping is history only: the shipment's position did not change, so nothing to say.
+    if (positionMoved) {
+      await announcePosition(tx, {
+        organizationId: ctx.organizationId,
+        shipmentId,
+        driverId: ctx.userId,
+        lat,
+        lng,
+        recordedAt,
+      });
+    }
+
+    return { ok: true, accepted: true, ping: ping!, positionMoved };
   });
 }
