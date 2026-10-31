@@ -20,9 +20,9 @@ Phase 1 delivered, checkpoint by checkpoint:
    handling, public tracking page; Playwright e2e against a dedicated database; README.
 6. Demo seed (`pnpm db:seed`), sign-in/sign-up rate limiting, Phase 1 docs.
 
-**Phase 2 (live tracking) is in progress on branch `phase-2-live-tracking`.** Checkpoint 3 is
-reached: format:check, lint, typecheck, test (156 unit + 180 integration), build and test:e2e
-(12 specs) pass. **Next: checkpoint 4 (live map).** The design is in `docs/architecture.md`,
+**Phase 2 (live tracking) is in progress on branch `phase-2-live-tracking`.** Checkpoint 4 is
+reached: format:check, lint, typecheck, test (178 unit + 181 integration), build and test:e2e (13 specs)
+pass. **Next: checkpoint 5 (truck simulator).** The design is in `docs/architecture.md`,
 "Phase 2: live tracking"; follow it. Checkpoints, each green and reviewed:
 
 1. **[done] Driver app and reassignment.** `/driver` (mobile-first, assigned shipments, big-button status
@@ -41,15 +41,17 @@ reached: format:check, lint, typecheck, test (156 unit + 180 integration), build
    client hooks that `router.refresh()` or update positions. Integration tests: notifications only
    on commit, cross-org isolation on the stream. Also: a Live indicator in both headers and the
    staff detail page's live "Last seen" line.
-4. **Live map.** MapLibre + OpenFreeMap, client-only; dashboard map of active shipments, detail-page
-   map with route and latest position; markers update from SSE. E2E with tile requests blocked.
-   Building blocks from checkpoint 3: `useLivePosition(shipmentId, initial)` and `useRealtime` in
-   `src/components/realtime/`, `getShipmentPositions` for the snapshot. The map needs a
-   positions snapshot it can re-fetch on `resync` (a route handler or Server Action over
-   `getShipmentPositions`), since `router.refresh()` does not reach client-held map state.
+4. **[done] Live map.** MapLibre GL 6 + OpenFreeMap "positron", client-only (`next/dynamic`,
+   `ssr: false`). `/dashboard/map` (a view next to the list, shareable URL): a marker per
+   unfinished shipment with a position, coloured by status tone, popups, a list of links beside
+   the map, live moves with a short ease. The detail page has a small route map (pickup, delivery,
+   straight `LineString`, live position marker). The seed gives the demo driver's unfinished
+   shipments a last position. E2E with tiles blocked.
 5. **Truck simulator.** OSRM route fixtures for the seed's city pairs (committed), a simulator
    script driving active shipments through the services. Phase 2 e2e: a driver advances a shipment
-   and the dashboard updates without a reload.
+   and the dashboard updates without a reload. The detail map's `RouteMap` already takes a
+   `LineString` (`route` prop): pass the fixture's geometry instead of `straightLineRoute`, and
+   make the line solid (it is dashed because a straight line is only an approximation).
 
 ## Roadmap
 
@@ -448,6 +450,69 @@ no-transform` makes it skip the response (checked in `next/dist/compiled/compres
   the page, off screen while the dispatcher is scrolled down to the form on a phone; it is now
   pinned to the bottom of the viewport.
 
+### Live map (Phase 2, checkpoint 4)
+
+- **Layout.** Pure: `src/lib/status-tone.ts` (status to tone to badge style and marker hex),
+  `geo.ts` (bounds, straight route, easing, coordinate text), `live-positions.ts` (merging live
+  fixes into the snapshot, list order), `formatElapsed` now goes to hours and days. MapLibre code
+  lives only in `src/components/map/`: `maplibre.ts` (CSS imports, worker URL, `useMapLibreMap`,
+  marker glide), `marker-elements.ts` (DOM markers), `fleet-map-canvas.tsx` /
+  `route-map-canvas.tsx` (default exports, loaded with `next/dynamic` by `fleet-map.tsx` /
+  `route-map.tsx`), `map-config.ts` (style URL, no MapLibre import). Page:
+  `src/app/dashboard/map/`.
+- **Gotcha: MapLibre 6 loads its worker from a separate file** (`maplibre-gl-worker.mjs`), found
+  next to its own module URL. Bundled, that URL is a Next chunk and the file is missing, so tiles
+  never decode. `setWorkerUrl(new URL("maplibre-gl/dist/maplibre-gl-worker.mjs",
+import.meta.url).href)` makes Turbopack emit the worker to `/_next/static/media/` and points
+  MapLibre at it. (Turbopack also emits the unused `-dev` worker; it is never downloaded.)
+- **Gotcha: `.maplibregl-map` sets `position: relative`**, and maplibre-gl.css loads after
+  Tailwind, so an `absolute inset-0` map container collapsed to 0 px height. The container is
+  `size-full` inside a sized `MapFrame`.
+- **Gotcha: never scale a marker's own element.** MapLibre positions markers with `transform` on
+  the element; CSS applies the separate `scale` property before `transform`, so `hover:scale-110`
+  scaled the translation and moved the marker ~40 px away from the pointer (clicks landed on the
+  canvas). Effects go on an inner disc (`group-hover:`). Found in the visual check.
+- **Gotcha: MapLibre fires a map `click` for clicks on a marker**, even with `stopPropagation`
+  (it tracks pointer events on the whole container). The map's close-on-click handler ignores
+  targets inside `[data-shipment-marker]`.
+- **Unmount and Activity.** `useMapLibreMap` creates the map in an effect and calls
+  `map.remove()` in its cleanup, which runs on unmount and when Next hides the route, so a hidden
+  page never holds a WebGL context or a worker. Showing the page again creates a fresh map fitted
+  to the current markers. The open popup is reset in a `useLayoutEffect` cleanup, like the
+  location-sharing switch.
+- **Snapshot refresh.** No snapshot endpoint: the map page re-renders through `LiveRefresh`
+  (resync, any `shipment_changed`, and via the new `alsoOn` prop a position for a shipment the
+  snapshot lacks), and `FleetMap` merges the new `snapshot` prop with live fixes (newest device
+  time wins). `router.refresh()` does reach client-held state, as long as the client derives from
+  props rather than copying them into state once. The snapshot decides which shipments exist.
+- **Server bundle and size.** MapLibre is absent from `.next/server`. Only the map page and the
+  detail page reference its chunk, loaded after hydration: about 1.08 MB raw / 292 KB gzip of JS,
+  plus the worker (519 KB / 147 KB gzip) and 72 KB / 10 KB gzip of CSS. The list and every other
+  page load nothing new.
+- **Attribution** is the style's own (OpenFreeMap, OpenMapTiles, OpenStreetMap), with
+  `compact: false` so it stays expanded at 390 px.
+- **Relative times** ("3 min ago") need the viewer's clock: `useNow` returns null during server
+  rendering and hydration, and the UTC time shows until then.
+- **Coordinates for the detail map** are optional at booking (the form does not ask), so UI-made
+  shipments have no pickup/delivery pins; the map then shows only the live position (and appears
+  for any unfinished shipment, ready for its first ping).
+- **E2E.** `tests/e2e/fixtures.ts` extends `test` so the default context answers the style URL
+  with an empty style and refuses anything else from `tiles.openfreemap.org`; contexts a spec
+  creates call `blockMapTiles`. Specs import `test`/`expect` from `./fixtures`. Markers carry
+  `data-lat`/`data-lng` (their target) for assertions. Headless Chromium has WebGL 2 (software).
+  `live-map.spec.ts` waits for the server's 10 s ping throttle, hence `test.slow()`.
+- **Seed positions.** The demo driver's unfinished shipments get one ping through
+  `recordLocationPing` (injected clock): on-the-road ones a few minutes before the seed's `now`,
+  the exception just before it stopped. Positions are interpolated between the cities without
+  drawing from the PRNG, so the rest of the seed is unchanged. 8 markers on a fresh seed.
+- **Proven-red checks (checkpoint 4):** `FleetMap` ignoring position events (live-map spec red:
+  the marker stayed at the first fix). Restored.
+- **Visual check** (Playwright, 390 px and 1280 px, real tiles, seeded data, production build):
+  dashboard map with and without a popup, detail page map. Fixes from it: the collapsed map
+  container, markers jumping on hover, the popup closing as soon as a marker was clicked, the
+  zoom buttons covering the delivery pin and clipping its label on a phone (the route map now fits
+  with extra right padding), and a popup opened from the list is panned clear of the edges.
+
 ### Testing
 
 - `pnpm test` runs two Vitest projects: `unit` (`src/**/*.test.ts`) and `integration`
@@ -509,9 +574,11 @@ no-transform` makes it skip the response (checked in `next/dist/compiled/compres
 - **Realtime: a deferred refresh after a failed validation.** Submitting drops a deferred refresh
   because the action re-renders the page; a validation error does not re-render, so the page stays
   on the older version until the next event (a later submit gets the conflict flow).
-- **"Last seen" shows minutes** (the shared UTC date format), so successive pings within a minute
-  only move the coordinates. A relative "12 s ago" would need a ticking clock; the map will show
-  freshness better.
+- **"Last seen" on the detail page shows minutes** (the shared UTC date format). The live map's
+  list and popups show a ticking relative time instead.
+- **Map markers can overlap** when shipments are close (two trucks in one city). Fine for a
+  small carrier; clustering (MapLibre's GeoJSON `cluster`) is the fix at fleet scale.
+- **The map has no dark basemap.** Positron is light; popups are styled light in both themes.
 
 ## Environment notes
 

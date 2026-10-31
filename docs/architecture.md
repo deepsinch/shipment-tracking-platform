@@ -402,6 +402,43 @@ message)` (organization; for drivers, assigned or previous driver) and is projec
 - End-to-end tests must not depend on tile servers: Playwright blocks tile requests and asserts on
   markers and data, not on rendered tiles.
 
+As implemented (checkpoint 4):
+
+- **Basemap.** OpenFreeMap's "positron" style: pale and nearly colourless, so the status colours
+  of the markers are the only colour on the map ("liberty" paints parks and water in the same
+  greens and blues as the statuses). Attribution comes from the style and stays expanded at
+  every width, as OpenStreetMap's licence asks.
+- **Client-only.** MapLibre is imported only by two canvas components loaded with `next/dynamic`
+  (`ssr: false`), so it is absent from the server bundle and loads after the page (about 290 KB
+  gzip of JS plus its tile worker, on the map and detail pages only). The page around it,
+  including the text list, is server-rendered.
+- **Placement.** `/dashboard/map` is its own route, switched to from the list with a "List | Map"
+  control (and the header). The list is paginated and shows every shipment; the map shows all
+  unfinished shipments with a position. Separate URLs keep both shareable and keep MapLibre out of
+  the most visited page.
+- **Data and live updates.** The page passes `getShipmentPositions` (now with the destination) to
+  `FleetMap`. Position events move markers in place (`mergeFleet`: the newest device time wins
+  between snapshot and event). Everything else is a page refresh through `LiveRefresh`: on
+  `resync`, on any `shipment_changed` (a delivered shipment drops out of the snapshot, so its
+  marker goes), and on a position for a shipment the snapshot does not know yet (its first ping).
+  This replaces the planned snapshot endpoint: the client derives its state from the snapshot
+  prop, so `router.refresh()` reaches it, and resync, coalescing and hidden-page handling stay in
+  one place.
+- **Markers** are DOM elements (buttons with an accessible label such as "WB-…, In transit, to
+  Antwerp"), coloured by the status tone shared with the badges (`statusTone`). A new fix glides
+  the marker over 800 ms with an ease-out, or jumps under `prefers-reduced-motion`. Clicking a
+  marker, or the "Show on map" button of its list entry, opens a popup (tracking code linking to
+  the detail page, status, destination, "last seen … ago"); Escape or a click on the map closes it.
+- **Text first.** Beside the map (under it on a phone) a list of the same shipments with links,
+  status, destination, last seen and coordinates, in a stable order (problems first, then by
+  tracking code), so it never reshuffles under a keyboard user. The detail page keeps its
+  "Last seen" line.
+- **Detail map.** Pickup and delivery pins, the route as a dashed straight line (`RouteMap` takes
+  any GeoJSON `LineString`; the simulator's road geometry will replace it), and the live position
+  marker. Cooperative gestures, since it sits in a scrolling page.
+- **Lifecycle.** The map is created in an effect and removed in its cleanup, which also runs when
+  Next hides the route (Activity), so hidden pages hold no WebGL context.
+
 ### Truck simulator
 
 - A script that drives seeded active shipments: it posts pings and status changes as the assigned
@@ -441,3 +478,7 @@ message)` (organization; for drivers, assigned or previous driver) and is projec
 | 24  | Pure `isVisibleTo` filter on the message, with `previousDriverId` in assignments    | No query per message per stream; a driver still hears about the shipment taken away from them                              | Re-checking `visibleShipments` per message (a query per event per stream); broadcasting and filtering in the browser              |
 | 25  | Listener kept 30 s after the last subscriber leaves                                 | Streams reconnect routinely; avoids a new connection and `LISTEN` on every gap while bounding idle connections             | Close immediately (churn); keep forever (an idle direct connection per instance)                                                  |
 | 26  | Refresh deferred while a version-keyed form has unsaved input                       | A live refresh must never wipe what the user typed; the conflict flow still guards stale submissions                       | Always refresh (loses input); never refresh pages with forms (stale data); controlled forms that survive remounts (larger change) |
+| 27  | Live map as its own route, `/dashboard/map`, beside the list                        | Shareable URL; the list stays free of MapLibre; the map shows a different set (unfinished, positioned, unpaginated)        | A toggle on the list page (map code and query on every list view); a map above the list (paginated data does not fit a map)       |
+| 28  | Map snapshot re-rendered by `LiveRefresh`, merged with live fixes on the client     | No new endpoint or auth surface; resync, coalescing and Activity handling reused; newest fix wins in any order             | A route handler or Server Action returning the snapshot (second data path to secure and test); re-fetch per position (wasteful)   |
+| 29  | DOM markers, not a GeoJSON symbol layer                                             | Focusable buttons with accessible labels, Tailwind styling, simple click handling; fine for a small carrier's fleet        | Symbol/circle layer (faster for thousands of points, but no keyboard focus or labels; would add clustering at scale)              |
+| 30  | OpenFreeMap "positron" basemap                                                      | Pale, data-first style: status colours stay the only colour on the map                                                     | "liberty" (colourful; greens and blues compete with the status colours), "bright"                                                 |
