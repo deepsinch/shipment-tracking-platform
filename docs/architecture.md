@@ -6,12 +6,12 @@ It is updated at the end of every phase.
 
 ## Users
 
-| Role       | Surface             | Can do                                                                           |
-| ---------- | ------------------- | -------------------------------------------------------------------------------- |
-| Admin      | `/dashboard`        | Everything a dispatcher can, plus manage members and org settings                |
-| Dispatcher | `/dashboard`        | Create shipments, assign drivers, change status, view all org shipments          |
-| Driver     | `/driver` (Phase 2) | See assigned shipments, update status, share location, capture proof of delivery |
-| Customer   | `/track/[code]`     | Public, no login. See status timeline and ETA for one shipment                   |
+| Role       | Surface         | Can do                                                                           |
+| ---------- | --------------- | -------------------------------------------------------------------------------- |
+| Admin      | `/dashboard`    | Everything a dispatcher can, plus manage members and org settings                |
+| Dispatcher | `/dashboard`    | Create shipments, assign drivers, change status, view all org shipments          |
+| Driver     | `/driver`       | See assigned shipments, update status, share location, capture proof of delivery |
+| Customer   | `/track/[code]` | Public, no login. See status timeline and ETA for one shipment                   |
 
 ## Stack
 
@@ -102,7 +102,8 @@ reveal. A driver can only be assigned if they are a `driver` member of the same 
 
 Use cases live in `src/server/services/`, one file per use case: `createShipment`, `listShipments`,
 `getShipment` (with actor and driver names), `changeShipmentStatus`, `getPublicTracking` and
-`listDrivers` (for assignment; admins and dispatchers only). Each takes an `AuthContext` argument
+`listDrivers` (for assignment; admins and dispatchers only), plus from Phase 2 `assignDriver` and
+`listAssignedShipments` (the driver app's list). Each takes an `AuthContext` argument
 (except the public lookup) instead of reading the session, so it runs in tests without Next.js.
 
 - **Expected outcomes are values.** Results are discriminated unions on `ok` and `reason`
@@ -211,6 +212,29 @@ implementation refines it checkpoint by checkpoint.
   `driver_assigned` event (internal history), and the driver must be a member of the same
   organization with the `driver` role.
 
+As implemented (checkpoint 1):
+
+- **Landing and guards.** `homePathFor(role)` is a pure domain rule. Sign-in resolves the new
+  session's `AuthContext` from its session row and redirects to that home. Each surface's layout
+  and pages call `requireAuthContextOn(surface)`, which redirects anyone on the wrong surface;
+  `proxy.ts` still only checks that a session cookie exists.
+- **Driver list.** `listAssignedShipments` is `visibleShipments(ctx)` plus "assigned to me".
+  Active shipments come first, by earliest promised delivery, then the 10 most recently finished.
+  Each card leads with the next stop (pickup before collection, delivery after) and flags overdue
+  deadlines.
+- **Status changes** use the same Server Action as the dashboard, so conflicts, validation and
+  every other result are handled identically. The buttons come from
+  `statusOptionsFor("driver", status)`, so drivers are never offered a cancellation.
+- **Assignment is a versioned change.** `assignDriver` follows the status-change recipe: read in
+  scope, version check, guarded `UPDATE ... version = version + 1`, event insert, one
+  transaction. Bumping the version means an assignment invalidates open status and assignment
+  forms. That is intended, since the shipment changed under them. Delivered and cancelled
+  shipments keep their driver (`closed`). Re-assigning the current driver is rejected, so every
+  `driver_assigned` event is a real change. The event has no status, and its `metadata` holds
+  `fromDriverId` and `toDriverId`.
+- **Event-time ordering** for status changes compares against the latest _status_ event only, so
+  an assignment never blocks a driver's legitimately backdated update.
+
 ### Location telemetry is not history
 
 Location pings are high-volume telemetry, not meaningful events, so they stay out of
@@ -234,8 +258,8 @@ Location pings are high-volume telemetry, not meaningful events, so they stay ou
 
 - Exact coordinates are never public. The tracking page shows city-level progress only.
 - The public timeline includes only customer-facing event types (`created`, `status_changed`).
-  Internal events such as `driver_assigned` are filtered out with an explicit allow-list, and a test
-  covers it.
+  Internal events such as `driver_assigned` are filtered out with an explicit allow-list
+  (`PUBLIC_SHIPMENT_EVENT_TYPES` in the domain, applied in the query), and tests cover it.
 
 ### Realtime: invalidation signals, not a replayed event log
 
@@ -303,3 +327,4 @@ messages as hints that data changed, not as the data itself:
 | 16  | `pg_notify` inside the write transaction, one `LISTEN` per instance, SSE to clients | Notifications only for committed writes; no new infrastructure; SSE matches one-way traffic        | WebSockets (two-way, harder on serverless); hosted pub/sub (extra service, kept possible via `RealtimeBus`); polling       |
 | 17  | OpenFreeMap tiles with MapLibre                                                     | Free, no API key, OSM data, allowed for app traffic                                                | `tile.openstreetmap.org` (usage policy), Mapbox/MapTiler (API keys, quotas)                                                |
 | 18  | Simulator routes from committed OSRM fixtures                                       | Real roads without a runtime dependency on a public routing server                                 | Live routing calls; straight-line interpolation only                                                                       |
+| 19  | Driver assignment bumps `version` and is refused once a shipment is finished        | A form rendered before a reassignment is stale like any other; a finished job keeps its record     | Separate assignment version (stale status forms would win); no version check (silent overwrite)                            |

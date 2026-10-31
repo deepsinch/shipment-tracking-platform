@@ -20,10 +20,12 @@ Phase 1 delivered, checkpoint by checkpoint:
    handling, public tracking page; Playwright e2e against a dedicated database; README.
 6. Demo seed (`pnpm db:seed`), sign-in/sign-up rate limiting, Phase 1 docs.
 
-**Next: Phase 2 (live tracking) on branch `phase-2-live-tracking`.** The design is in
-`docs/architecture.md`, "Phase 2: live tracking"; follow it. Checkpoints, each green and reviewed:
+**Phase 2 (live tracking) is in progress on branch `phase-2-live-tracking`.** Checkpoint 1 is
+reached: format:check, lint, typecheck, test (85 unit + 122 integration), build and test:e2e
+(6 specs) pass. **Next: checkpoint 2 (location pings).** The design is in `docs/architecture.md`,
+"Phase 2: live tracking"; follow it. Checkpoints, each green and reviewed:
 
-1. **Driver app and reassignment.** `/driver` (mobile-first, assigned shipments, big-button status
+1. **[done] Driver app and reassignment.** `/driver` (mobile-first, assigned shipments, big-button status
    flow via `statusOptionsFor`), role-based landing after sign-in, `assignDriver` service with a
    `driver_assigned` event, and the public timeline restricted to customer-facing event types by an
    allow-list (with a test). E2E: a driver signs in, lands on `/driver`, advances a shipment.
@@ -234,7 +236,8 @@ drizzle-orm 0.45.4, drizzle-kit 0.31.11, pg 8.23, zod 4.6.7, @playwright/test 1.
   two address blocks a `group` role (scope "Country code" to `Pickup` / `Delivery`). Form messages
   use `data-testid` (`form-alert`, `form-status`) because of the route announcer's role alert.
 - **Killing a background server:** `pkill -f "next start"` also matches the shell running it and
-  ends the command; find the PID by port (`ss -ltnp | grep 3200`) instead.
+  ends the command; find the PID by port instead (`ss` is not installed in every container; if
+  you started it as a background task, stop that task).
 
 ### Seed and rate limiting (checkpoint 6)
 
@@ -257,6 +260,53 @@ drizzle-orm 0.45.4, drizzle-kit 0.31.11, pg 8.23, zod 4.6.7, @playwright/test 1.
 - **e2e and sign-up limits:** sign-up allows 10 per IP per hour, and every e2e run starts from a
   wiped database, so the e2e sign-ups never hit it. Manual testing against the dev DB can; wait,
   or `DELETE FROM auth_rate_limits`.
+
+### Driver app and reassignment (Phase 2, checkpoint 1)
+
+- **Role-based landing.** `homePathFor(role)` (`src/domain/role-home.ts`) is the one rule.
+  `signIn` returns the new session's `AuthContext`, resolved from the `session` row by its token:
+  the session cookie set by `nextCookies` only reaches the browser with the response, so
+  `getAuthContext()` (which reads request headers) cannot see it inside the same action.
+- **Surface guards.** `requireAuthContextOn("/dashboard" | "/driver")` in `session.ts` runs in each
+  surface's layout and every page, and redirects to the role's home. `proxy.ts` now also matches
+  `/driver/:path*`, still only checking that a cookie exists.
+- **Gotcha: those redirects happen after streaming starts** (the guard runs inside `<Suspense>`),
+  so Next performs them client-side. The browser shows the skeleton briefly and the HTTP status is 200. In e2e, assert with `await expect(page).toHaveURL(...)` (it waits), never `page.url()`.
+- **Status action is shared** by both surfaces: `src/app/_actions/change-status.ts`. Forms send
+  only the fields they have (missing fields read as blank) and it revalidates both surfaces' paths.
+  The driver form's buttons are `type="submit" name="toStatus" value=...`; React includes the
+  submitter in the action's `FormData`, and `useFormStatus().data` tells which button is pending.
+- **Shared UI:** `ShipmentHistory` (`src/components/shipment-history.tsx`, also names driver
+  changes) and `ActionMessage` (`form-status` / `form-alert` test ids).
+- **`assignDriver` bumps `version`** (a stale assignment or status form becomes a conflict), writes
+  a `driver_assigned` event with `metadata: { fromDriverId, toDriverId }`, and refuses delivered
+  and cancelled shipments (`closed`, see `canChangeDriver`). Assigning the current driver again is
+  a validation error, so every event records a real change. The initial assignment at booking is
+  part of the `created` event, not a separate `driver_assigned` event.
+- **The status-change ordering check ignores events without a status.** `latestStatusEventTime`
+  filters on `to_status IS NOT NULL`, so a driver can still backdate a pickup that happened before
+  the office assigned them (test in `assign-driver.integration.test.ts`).
+- **Public allow-list:** `PUBLIC_SHIPMENT_EVENT_TYPES` in `src/domain/shipment-event.ts`, applied
+  as `inArray` in `getPublicTracking`. The domain test restates the list on purpose.
+- **`listAssignedShipments`** adds "assigned to me" to `visibleShipments`, so it stays personal for
+  any role. Finished shipments are ordered by `updated_at` (set by Drizzle's `$onUpdate` on every
+  service update).
+- **Gotcha: `ALTER TYPE ... ADD VALUE` (migration 0004).** Postgres refuses to _use_ a new enum
+  value in the transaction that added it, and the Drizzle migrator applies all pending migrations
+  in one transaction. A later migration that references `'driver_assigned'` (a CHECK, a backfill)
+  would fail on a fresh database. Cast through text or ship it in a separate release.
+- **E2E drivers:** there is no member management UI, so `addDriver()` in `tests/e2e/helpers.ts`
+  runs `tests/e2e/add-driver.ts` with `tsx --conditions=react-server` against `E2E_DATABASE_URL`.
+  It uses Better Auth (`signUpEmail` + `addMember`) like the seed. The assignment itself goes
+  through the reassign UI.
+- **Proven-red checks (checkpoint 1):** in `assignDriver`, removing the role check (1 test red),
+  the driver membership check (4 red), or `visibleShipments` (1 red); removing the public
+  `inArray` allow-list (2 red); removing `visibleShipments` from `listAssignedShipments` (1 red).
+  All restored.
+- **Visual check** (Playwright screenshots, 390 px and 1280 px, seeded dev data). Two fixes came
+  out of it. On the staff detail page, the taller side column (status plus driver card) stretched
+  grid row 1 and left a gap above History; `lg:grid-rows-[auto_1fr]` fixed it. On the driver app,
+  shipments past their promised time now read "Overdue" in red (words and colour).
 
 ### Testing
 
@@ -297,6 +347,14 @@ drizzle-orm 0.45.4, drizzle-kit 0.31.11, pg 8.23, zod 4.6.7, @playwright/test 1.
   product choice; revisit with email verification in Phase 3 ("check your email" response).
 - An org-less user (see sign-up above) is sent to `/sign-in` while still signed in, which is
   confusing. A dedicated "no organization" page would be clearer.
+- **Driver buttons have no confirmation.** "Mark as delivered" is terminal and one tap away on a
+  phone. Proof of delivery (Phase 3) will gate it; until then a mis-tap needs the office (which
+  cannot undo it either, by design of the state machine).
+- **Drivers see internal notes and other drivers' names in the history** (getShipment returns the
+  organization's full history to any member who can see the shipment). Intended: office notes
+  such as gate codes are for drivers. Revisit if notes ever need a staff-only level.
+- **Wrong-surface redirects are client-side** (see checkpoint 1 gotchas). A role-aware proxy
+  would need the role in the session cookie, which conflicts with decision 8.
 
 ## Environment notes
 
