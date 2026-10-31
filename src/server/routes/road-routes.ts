@@ -1,6 +1,6 @@
 import "server-only";
 
-import { straightLineRoute, type LatLng, type LineString } from "@/lib/geo";
+import { straightLineRoute, type LatLng, type RouteLine } from "@/lib/geo";
 
 import fixtureJson from "./road-routes.json";
 import { roadRouteFixtureSchema, type RoadRoute } from "./road-route-fixture";
@@ -37,12 +37,6 @@ export function findRoadRoute(
   return routes.find((route) => near(route.from, origin) && near(route.to, destination)) ?? null;
 }
 
-export type ShipmentRoute = {
-  /** "road" follows real roads; "straight" is only the direction of travel. */
-  kind: "road" | "straight";
-  line: LineString;
-};
-
 /**
  * The line to draw (or drive) between two stops: the road route when the fixture has one, a
  * straight line otherwise (UI-booked shipments between other places). Over the distances the demo
@@ -52,7 +46,7 @@ export function routeBetween(
   origin: LatLng,
   destination: LatLng,
   routes: readonly RoadRoute[] = roadRoutes(),
-): ShipmentRoute {
+): RouteLine {
   const road = findRoadRoute(origin, destination, routes);
   return road
     ? { kind: "road", line: { type: "LineString", coordinates: road.coordinates } }

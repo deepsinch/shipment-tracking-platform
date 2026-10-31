@@ -4,7 +4,7 @@ import { Marker, type GeoJSONSource } from "maplibre-gl";
 import { useEffect, useRef } from "react";
 
 import type { ShipmentStatus } from "@/domain/shipment-status";
-import { boundsOf, WESTERN_EUROPE, type LatLng, type LineString } from "@/lib/geo";
+import { boundsOf, WESTERN_EUROPE, type LatLng, type RouteLine } from "@/lib/geo";
 import type { Fix } from "@/lib/live-positions";
 
 import { cancelGlide, glideMarker, useMapLibreMap, type MapLibreMap } from "./maplibre";
@@ -26,8 +26,8 @@ export type RouteMapCanvasProps = {
   };
   origin: Stop | null;
   destination: Stop | null;
-  /** The route to draw. A straight line for now; road geometry later, with no change here. */
-  route: LineString | null;
+  /** The route to draw: solid along real roads, dashed when it is only a straight line. */
+  route: RouteLine | null;
   /** The latest position, kept live by the caller; null hides the marker. */
   position: Fix | null;
 };
@@ -140,20 +140,28 @@ function stopMarker(kind: "pickup" | "delivery", stop: Stop): Marker {
   }).setLngLat([stop.lng, stop.lat]);
 }
 
-function showRoute(map: MapLibreMap, route: LineString): void {
-  const data = { type: "Feature" as const, properties: {}, geometry: route };
+const ROUTE_LAYER = "route-line";
+
+function showRoute(map: MapLibreMap, route: RouteLine): void {
+  const data = { type: "Feature" as const, properties: {}, geometry: route.line };
+  // Dashed for a straight line: it is where the shipment is going, not the road it takes.
+  const dash = route.kind === "straight" ? [1, 2] : undefined;
   const source = map.getSource<GeoJSONSource>(ROUTE_SOURCE);
   if (source) {
     source.setData(data);
+    map.setPaintProperty(ROUTE_LAYER, "line-dasharray", dash);
     return;
   }
   map.addSource(ROUTE_SOURCE, { type: "geojson", data });
   map.addLayer({
-    id: "route-line",
+    id: ROUTE_LAYER,
     type: "line",
     source: ROUTE_SOURCE,
     layout: { "line-cap": "round", "line-join": "round" },
-    // Dashed: a straight line is where the shipment is going, not the road it takes.
-    paint: { "line-color": "#334155", "line-width": 2.5, "line-dasharray": [1, 2] },
+    paint: {
+      "line-color": "#334155",
+      "line-width": route.kind === "road" ? 3 : 2.5,
+      ...(dash && { "line-dasharray": dash }),
+    },
   });
 }

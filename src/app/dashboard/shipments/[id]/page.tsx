@@ -16,9 +16,9 @@ import { RouteMap } from "@/components/map/route-map";
 import type { Stop } from "@/components/map/route-map-canvas";
 import type { LivePosition } from "@/components/realtime/use-live-position";
 import { formatDateTime, formatPlace, formatWeight } from "@/lib/format";
-import { straightLineRoute } from "@/lib/geo";
 import { requireAuthContextOn, type AuthContext } from "@/server/auth/session";
 import type { Shipment } from "@/server/db/schema";
+import { routeBetween } from "@/server/routes/road-routes";
 import { getShipment } from "@/server/services/get-shipment";
 import { getShipmentPositions } from "@/server/services/get-shipment-positions";
 import { listDrivers } from "@/server/services/list-drivers";
@@ -227,7 +227,9 @@ function stopOf(lat: number | null, lng: number | null, city: string): Stop | nu
 
 /**
  * Pickup, delivery, the route between them and the latest position. Shown when there is at least
- * one point to draw; the addresses and "Last seen" stay as text either way.
+ * one point to draw; the addresses and "Last seen" stay as text either way. The route follows
+ * real roads when the committed fixture knows the pair (seeded shipments), and is a straight line
+ * otherwise; only that one LineString is sent to the browser.
  */
 function ShipmentRouteMap({
   shipment,
@@ -255,7 +257,7 @@ function ShipmentRouteMap({
       }}
       origin={origin}
       destination={destination}
-      route={origin && destination ? straightLineRoute(origin, destination) : null}
+      route={origin && destination ? routeBetween(origin, destination) : null}
       initialPosition={lastPosition}
     />
   );

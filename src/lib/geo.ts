@@ -11,6 +11,9 @@ export type Bounds = [[number, number], [number, number]];
 /** A GeoJSON LineString (RFC 7946), [longitude, latitude] pairs. */
 export type LineString = { type: "LineString"; coordinates: [number, number][] };
 
+/** A route to draw: along real roads, or a straight line that only shows the direction. */
+export type RouteLine = { kind: "road" | "straight"; line: LineString };
+
 /**
  * The view when there is nothing to show: Western Europe, from Brittany to Bohemia and from the
  * Pyrenees to Denmark, where the demo carrier operates.
@@ -46,9 +49,8 @@ export function boundsOf(points: readonly LatLng[]): Bounds | null {
 }
 
 /**
- * The route drawn between pickup and delivery until real road geometry exists (the truck
- * simulator's fixtures): a straight line. Callers take any LineString, so swapping in a road
- * route changes no component.
+ * A straight line between two stops: the fallback route when no road geometry is known for them
+ * (see `routeBetween` in `src/server/routes/road-routes.ts`).
  */
 export function straightLineRoute(from: LatLng, to: LatLng): LineString {
   return {
