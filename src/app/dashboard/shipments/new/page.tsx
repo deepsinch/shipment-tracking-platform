@@ -4,7 +4,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { canCreateShipments } from "@/domain/shipment-permissions";
-import { requireAuthContext } from "@/server/auth/session";
+import { requireAuthContextOn } from "@/server/auth/session";
 import { listDrivers } from "@/server/services/list-drivers";
 
 import { NewShipmentForm } from "./new-shipment-form";
@@ -12,7 +12,7 @@ import { NewShipmentForm } from "./new-shipment-form";
 export const metadata: Metadata = { title: "New shipment" };
 
 export default async function NewShipmentPage() {
-  const ctx = await requireAuthContext();
+  const ctx = await requireAuthContextOn("/dashboard");
   // Drivers cannot create shipments (createShipment would answer `forbidden`). The list hides the
   // button for them; someone typing the URL is sent back to the list.
   if (!canCreateShipments(ctx.role)) redirect("/dashboard/shipments");

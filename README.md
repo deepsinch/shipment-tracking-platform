@@ -24,8 +24,21 @@ a real Postgres.
 - **Secure by default:** every query is scoped to your company, history is append-only in the
   database, and sign-in and sign-up are rate limited.
 
-Next up (Phase 2): a driver app, live location on a map and realtime updates (see the roadmap in
-[docs/implementation-notes.md](docs/implementation-notes.md)).
+## Features (Phase 2: live tracking)
+
+- **Driver app** (`/driver`): a phone-first list of the driver's own jobs, big buttons for the next
+  status, and "Share my location" while a shipment is on the road.
+- **Realtime:** the dashboard, detail pages and driver app update without a reload (Server-Sent
+  Events fed by Postgres `LISTEN/NOTIFY`), with a Live indicator and no lost input while you type.
+- **Live map** (`/dashboard/map`): every unfinished shipment at its last known position, coloured
+  by status, gliding as drivers report, with a text list beside it.
+- **Road routes:** the detail page draws the real driving route for the demo's city pairs, from
+  committed OpenStreetMap routing fixtures (no routing service at runtime).
+- **Truck simulator** (`pnpm simulate`): drives the demo trucks along those roads as their driver,
+  through the same rules as a real phone, so the map moves.
+
+Next up (Phase 3): a public API, webhooks, email notifications, proof of delivery and AI intake of
+shipment requests (see the roadmap in [docs/implementation-notes.md](docs/implementation-notes.md)).
 
 ## Stack
 
@@ -71,6 +84,24 @@ password `demo-password` (demo only):
    instead of overwriting.
 4. Sign in as the driver to see the restricted view.
 
+### Try the live demo locally
+
+1. Load fresh demo data: `pnpm db:seed --reset` (local `waybill` database only).
+2. Start the app: `pnpm dev` (or `pnpm build && pnpm start`).
+3. Sign in at http://localhost:3000/sign-in as `dispatcher@demo.test` / `demo-password`.
+4. In a second terminal, run `pnpm simulate`.
+5. Open **Live map**: the trucks move every 12 seconds along real roads, go out for delivery near
+   the address and are delivered (they then leave the map). Now and then one reports an exception
+   and carries on a minute later. Open a shipment to see its route and live position, or its
+   public tracking page to see the customer's view.
+
+The simulator acts as each shipment's assigned driver through the app's own services, so it obeys
+every rule a person does (it cannot cancel, it cannot ping faster than every 10 seconds). It also
+picks up assigned shipments still waiting at the sender: assign the demo driver to a new shipment
+booked between two demo cities and watch it join. Options: `--speed 60` (time compression, default
+30), `--shipments 3`, `--seed 7`, `--once`. Ctrl+C stops it. When everything is delivered it says
+so; reseed for another run.
+
 The seed runs once (a re-run is a no-op, because history is never deleted). For fresh dates, run
 `pnpm db:seed --reset`, which wipes and re-creates the local `waybill` database only.
 
@@ -99,6 +130,15 @@ The seed runs once (a re-run is a no-op, because history is never deleted). For 
 | `pnpm db:migrate`    | Apply migrations to `DATABASE_URL`                         |
 | `pnpm db:seed`       | Load the demo data (`--reset` recreates the dev database)  |
 | `pnpm auth:generate` | Regenerate the Better Auth tables (must be a no-op change) |
+| `pnpm simulate`      | Drive the demo trucks so the live map moves (dev DB only)  |
+| `pnpm routes:fetch`  | One-off: re-fetch the committed road route fixture (OSRM)  |
+
+## Credits
+
+- Map data and road route geometry © [OpenStreetMap](https://www.openstreetmap.org/copyright)
+  contributors, available under the Open Database License (ODbL).
+- Map tiles by [OpenFreeMap](https://openfreemap.org/) (OpenMapTiles schema).
+- Road routes were computed once with [OSRM](https://project-osrm.org/) and committed as fixtures.
 
 ## Documentation
 

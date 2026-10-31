@@ -1,10 +1,12 @@
 import { asc, eq, inArray } from "drizzle-orm";
 import { beforeAll, describe, expect, it } from "vitest";
 
-import { canTransition, SHIPMENT_STATUSES } from "@/domain/shipment-status";
+import { isOverdue } from "@/domain/driver-tasks";
+import { canTransition, isTerminalStatus, SHIPMENT_STATUSES } from "@/domain/shipment-status";
 import { getAuth } from "@/server/auth/auth";
 import { getDb } from "@/server/db/client";
 import { member, shipmentEvents, shipments, user } from "@/server/db/schema";
+import { getShipmentPositions } from "@/server/services/get-shipment-positions";
 
 import { DEMO_PASSWORD, DEMO_USERS, seedDemo, type SeedResult } from "./demo-seed";
 
@@ -74,6 +76,53 @@ describe("seedDemo", () => {
       expect(history.at(-1)!.toStatus).toBe(shipment.status);
       expect(shipment.version).toBe(history.length);
       expect(history.at(-1)!.occurredAt.getTime()).toBeLessThanOrEqual(now.getTime());
+    }
+  });
+
+  it("keeps the demo believable: only a couple of unfinished shipments are overdue", async () => {
+    if (result.status !== "seeded") throw new Error("expected a fresh seed");
+    const seeded = await getDb()
+      .select({
+        status: shipments.status,
+        promisedDeliveryAt: shipments.promisedDeliveryAt,
+        assignedDriverId: shipments.assignedDriverId,
+      })
+      .from(shipments)
+      .where(eq(shipments.organizationId, result.organizationId));
+    const [driver] = await getDb()
+      .select({ id: user.id })
+      .from(user)
+      .where(eq(user.email, "driver@demo.test"));
+
+    const unfinished = seeded.filter((shipment) => !isTerminalStatus(shipment.status));
+    const overdue = unfinished.filter((shipment) => isOverdue(shipment, now));
+    expect(overdue).toHaveLength(2);
+    // Both on the demo driver's list, among more that are on time.
+    const driversActive = unfinished.filter((shipment) => shipment.assignedDriverId === driver!.id);
+    expect(overdue.every((shipment) => shipment.assignedDriverId === driver!.id)).toBe(true);
+    expect(driversActive.length).toBeGreaterThan(4);
+  });
+
+  it("gives the demo driver's unfinished shipments a recent last position for the map", async () => {
+    if (result.status !== "seeded") throw new Error("expected a fresh seed");
+    const [dispatcher] = await getDb()
+      .select({ id: user.id })
+      .from(user)
+      .where(eq(user.email, "dispatcher@demo.test"));
+    const snapshot = await getShipmentPositions({
+      userId: dispatcher!.id,
+      organizationId: result.organizationId,
+      role: "dispatcher",
+    });
+    if (!snapshot.ok) throw new Error("unexpected");
+
+    // Every one on the road, plus one exception at the position where it stopped.
+    expect(snapshot.positions.length).toBeGreaterThanOrEqual(6);
+    const statuses = new Set(snapshot.positions.map((position) => position.status));
+    expect(statuses).toContain("exception");
+    expect(statuses).toContain("in_transit");
+    for (const position of snapshot.positions) {
+      expect(position.recordedAt.getTime()).toBeLessThanOrEqual(now.getTime());
     }
   });
 

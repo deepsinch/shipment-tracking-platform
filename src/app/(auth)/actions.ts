@@ -3,6 +3,7 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
+import { homePathFor } from "@/domain/role-home";
 import { getAuth } from "@/server/auth/auth";
 import { clientIp } from "@/server/auth/client-ip";
 import { tooManyAttemptsMessage } from "@/server/auth/rate-limit";
@@ -43,7 +44,8 @@ export async function signUpAction(_prev: SignUpState, formData: FormData): Prom
     body: { email: String(formData.get("email")), password: String(formData.get("password")) },
     headers: requestHeaders,
   });
-  redirect("/dashboard");
+  // Sign-up always creates an admin of the new organization.
+  redirect(homePathFor("admin"));
 }
 
 export async function signInAction(_prev: SignInState, formData: FormData): Promise<SignInState> {
@@ -62,7 +64,8 @@ export async function signInAction(_prev: SignInState, formData: FormData): Prom
       values,
     };
   }
-  redirect("/dashboard");
+  // Without an organization there is no home; the dashboard guard handles that case as before.
+  redirect(result.context ? homePathFor(result.context.role) : "/dashboard");
 }
 
 export async function signOutAction(): Promise<void> {

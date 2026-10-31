@@ -1,4 +1,6 @@
-import { randomUUID } from "node:crypto";
+import { execFile } from "node:child_process";
+import { randomInt, randomUUID } from "node:crypto";
+import { promisify } from "node:util";
 
 import { expect, type Page } from "@playwright/test";
 
@@ -9,15 +11,100 @@ import { expect, type Page } from "@playwright/test";
  * - Next's route announcer has role="alert"; form messages are found by test id instead.
  */
 
-/** Signs up a new user, who becomes the admin of a new company, and lands on the shipment list. */
-export async function signUp(page: Page, name = "Erin Dispatcher"): Promise<void> {
+const PASSWORD = "correct-horse-battery";
+
+/**
+ * Signs up a new user, who becomes the admin of a new company, and lands on the shipment list.
+ * Returns their email.
+ *
+ * Each test's company is a different customer, so its browser context gets its own client
+ * address (TEST-NET-3, reserved for documentation) in `x-forwarded-for`, the header the app's
+ * rate limits trust from the platform proxy. Otherwise the suite's sign-ups would share one
+ * address and hit the limit of 10 sign-ups per IP per hour.
+ */
+export async function signUp(page: Page, name = "Erin Dispatcher"): Promise<string> {
+  const email = `e2e-${randomUUID()}@example.test`;
+  const clientIp = `203.0.113.${randomInt(1, 255)}`;
+  await page.context().setExtraHTTPHeaders({ "x-forwarded-for": clientIp });
   await page.goto("/sign-up");
   await page.getByLabel("Your name", { exact: true }).fill(name);
-  await page.getByLabel("Email", { exact: true }).fill(`e2e-${randomUUID()}@example.test`);
-  await page.getByLabel("Password", { exact: true }).fill("correct-horse-battery");
+  await page.getByLabel("Email", { exact: true }).fill(email);
+  await page.getByLabel("Password", { exact: true }).fill(PASSWORD);
   await page.getByLabel("Company name", { exact: true }).fill("E2E Freight");
   await page.getByRole("button", { name: "Create account" }).click();
   await expect(page.getByRole("heading", { name: "Shipments", level: 1 })).toBeVisible();
+  return email;
+}
+
+/**
+ * Cuts the page off from live updates (`/api/realtime`), for tests about what happens when a tab
+ * did not hear about a change in time: optimistic concurrency, not realtime, is the guarantee.
+ * Call it before the page navigates.
+ */
+export async function withoutLiveUpdates(page: Page): Promise<void> {
+  await page.route("**/api/realtime", (route) => route.abort());
+}
+
+/** Waits until the page's realtime connection is established (the header's Live indicator). */
+export async function expectLive(page: Page): Promise<void> {
+  await expect(page.getByTestId("live-indicator")).toHaveAttribute("data-status", "live");
+}
+
+/**
+ * Marks the page's window. The mark survives client-side re-renders (`router.refresh()`) but not
+ * a reload, so `expectNotReloaded` proves an update arrived live.
+ */
+export async function markWindow(page: Page): Promise<void> {
+  await page.evaluate(() => Object.assign(window, { __waybillNotReloaded: true }));
+}
+
+export async function expectNotReloaded(page: Page): Promise<void> {
+  expect(await page.evaluate(() => "__waybillNotReloaded" in window)).toBe(true);
+}
+
+/** Signs in with the shared e2e password; where the user lands depends on their role. */
+export async function signIn(page: Page, email: string): Promise<void> {
+  await page.goto("/sign-in");
+  await page.getByLabel("Email", { exact: true }).fill(email);
+  await page.getByLabel("Password", { exact: true }).fill(PASSWORD);
+  await page.getByRole("button", { name: "Sign in" }).click();
+}
+
+/**
+ * Adds a driver to the admin's company and returns their email. There is no member management UI
+ * yet, so this runs `add-driver.ts`, which uses Better Auth like the demo seed (no raw SQL). It
+ * runs as a separate process because server modules need the `react-server` condition.
+ */
+export async function addDriver(adminEmail: string, name: string): Promise<string> {
+  const email = `e2e-driver-${randomUUID()}@example.test`;
+  await promisify(execFile)(
+    "pnpm",
+    [
+      "exec",
+      "tsx",
+      "--conditions=react-server",
+      "tests/e2e/add-driver.ts",
+      adminEmail,
+      name,
+      email,
+      PASSWORD,
+    ],
+    // The same database the app under test uses (see playwright.config.ts).
+    { env: { ...process.env, DATABASE_URL: process.env.E2E_DATABASE_URL } },
+  );
+  return email;
+}
+
+/** The shipment's stored latest position, read from the e2e database. */
+export async function readPosition(
+  trackingCode: string,
+): Promise<{ lat: number; lng: number; accuracyM: number } | null> {
+  const { stdout } = await promisify(execFile)(
+    "pnpm",
+    ["exec", "tsx", "--conditions=react-server", "tests/e2e/read-position.ts", trackingCode],
+    { env: { ...process.env, DATABASE_URL: process.env.E2E_DATABASE_URL } },
+  );
+  return JSON.parse(stdout);
 }
 
 /** Books a shipment from the list page and returns its tracking code (on its detail page). */

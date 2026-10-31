@@ -13,6 +13,7 @@ import {
   createTestShipment,
   createTestUser,
 } from "../../../tests/integration/fixtures";
+import { assignDriver } from "./assign-driver";
 import { getShipment } from "./get-shipment";
 
 describe("getShipment", () => {
@@ -84,6 +85,31 @@ describe("getShipment", () => {
     expect(await getShipment(dispatcher, assigned.id)).toMatchObject({
       assignedDriverName: driver.name,
     });
+  });
+
+  it("names the drivers of an assignment event", async () => {
+    const [ann, bo] = await Promise.all([
+      createTestUser(dispatcher.organizationId, "driver"),
+      createTestUser(dispatcher.organizationId, "driver"),
+    ]);
+    await getDb().update(user).set({ name: "Ann Driver" }).where(eq(user.id, ann!.id));
+    await getDb().update(user).set({ name: "Bo Driver" }).where(eq(user.id, bo!.id));
+    const assigned = await createTestShipment(dispatcher.organizationId, dispatcher.userId, {
+      assignedDriverId: ann!.id,
+    });
+    await assignDriver(dispatcher, {
+      shipmentId: assigned.id,
+      expectedVersion: 1,
+      driverId: bo!.id,
+    });
+
+    const result = await getShipment(dispatcher, assigned.id);
+
+    if (!result.ok) throw new Error("expected the shipment");
+    expect(result.events.map((event) => event.assignment)).toEqual([
+      null,
+      { fromName: "Ann Driver", toName: "Bo Driver" },
+    ]);
   });
 
   it("returns not_found for another organization's shipment", async () => {
