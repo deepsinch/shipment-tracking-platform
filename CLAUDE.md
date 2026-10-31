@@ -48,9 +48,15 @@ src/
 ## Commits
 
 - Conventional-style messages (`feat(domain): ...`, `fix: ...`, `docs: ...`, `chore: ...`).
-- The author is the repo owner. In a fresh clone, set repo-local config:
-  `git config user.name "deepsinch"` and
-  `git config user.email "56645980+deepsinch@users.noreply.github.com"`.
+- The author is the repo owner; the committer is Claude, so the commit signature matches the committer
+  and GitHub shows commits as Verified. In a fresh clone, set repo-local config:
+  ```
+  git config author.name "deepsinch"
+  git config author.email "56645980+deepsinch@users.noreply.github.com"
+  git config committer.name "Claude"
+  git config committer.email "noreply@anthropic.com"
+  ```
+  Check with `git log -1 --format='%an <%ae> / %cn <%ce> / sig:%G?'` after the first commit.
 - Every commit message ends with these two trailer lines (the session URL changes per session; use the current one):
   ```
   Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
