@@ -48,7 +48,7 @@ describe("changeShipmentStatus", () => {
   });
 
   it("updates the status, bumps the version and records the event in one go", async () => {
-    const shipment = await newShipment();
+    const shipment = await newShipment({ createdAt: new Date(Date.now() - 2 * 60 * 60_000) });
     const occurredAt = new Date(Date.now() - 30 * 60_000);
 
     const result = await changeShipmentStatus(dispatcher, {
@@ -172,6 +172,83 @@ describe("changeShipmentStatus", () => {
     await expectUnchanged(shipment);
   });
 
+  describe("event time", () => {
+    const hoursAgo = (hours: number) => new Date(Date.now() - hours * 60 * 60_000);
+
+    it("rejects a time before the latest event, writing nothing", async () => {
+      const shipment = await newShipment({ createdAt: hoursAgo(1) });
+
+      const result = await changeShipmentStatus(dispatcher, {
+        shipmentId: shipment.id,
+        expectedVersion: 1,
+        toStatus: "picked_up",
+        occurredAt: hoursAgo(2),
+      });
+
+      expect(result).toEqual({
+        ok: false,
+        reason: "validation",
+        fieldErrors: {
+          occurredAt: [`Must be after the previous update (${shipment.createdAt.toISOString()})`],
+        },
+      });
+      await expectUnchanged(shipment);
+    });
+
+    it("accepts a time equal to the latest event", async () => {
+      const shipment = await newShipment({ createdAt: hoursAgo(1) });
+
+      const result = await changeShipmentStatus(dispatcher, {
+        shipmentId: shipment.id,
+        expectedVersion: 1,
+        toStatus: "picked_up",
+        occurredAt: shipment.createdAt,
+      });
+
+      expect(result.ok && result.event.occurredAt).toEqual(shipment.createdAt);
+    });
+
+    it("compares against the latest event, not the first", async () => {
+      const shipment = await newShipment({ createdAt: hoursAgo(3) });
+      const first = await changeShipmentStatus(dispatcher, {
+        shipmentId: shipment.id,
+        expectedVersion: 1,
+        toStatus: "picked_up",
+        occurredAt: hoursAgo(1),
+      });
+      expect(first.ok).toBe(true);
+
+      const tooEarly = await changeShipmentStatus(dispatcher, {
+        shipmentId: shipment.id,
+        expectedVersion: 2,
+        toStatus: "in_transit",
+        occurredAt: hoursAgo(2),
+      });
+      const later = await changeShipmentStatus(dispatcher, {
+        shipmentId: shipment.id,
+        expectedVersion: 2,
+        toStatus: "in_transit",
+        occurredAt: hoursAgo(0.5),
+      });
+
+      expect(tooEarly).toMatchObject({ ok: false, reason: "validation" });
+      expect(later.ok).toBe(true);
+    });
+
+    it("never defaults to a time before the latest event (fast device clock)", async () => {
+      const slightlyAhead = new Date(Date.now() + 2 * 60_000);
+      const shipment = await newShipment({ createdAt: slightlyAhead });
+
+      const result = await changeShipmentStatus(dispatcher, {
+        shipmentId: shipment.id,
+        expectedVersion: 1,
+        toStatus: "picked_up",
+      });
+
+      expect(result.ok && result.event.occurredAt).toEqual(slightlyAhead);
+    });
+  });
+
   describe("drivers", () => {
     let driver: AuthContext;
 
@@ -206,6 +283,19 @@ describe("changeShipmentStatus", () => {
 
       expect(result.ok && result.shipment.status).toBe("picked_up");
       expect(result.ok && result.event.actorUserId).toBe(driver.userId);
+    });
+
+    it("cannot cancel a shipment assigned to them (forbidden), writing nothing", async () => {
+      const shipment = await newShipment({ assignedDriverId: driver.userId });
+
+      const result = await changeShipmentStatus(driver, {
+        shipmentId: shipment.id,
+        expectedVersion: 1,
+        toStatus: "cancelled",
+      });
+
+      expect(result).toEqual({ ok: false, reason: "forbidden" });
+      await expectUnchanged(shipment);
     });
   });
 

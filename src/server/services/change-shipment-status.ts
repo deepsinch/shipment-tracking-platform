@@ -1,14 +1,22 @@
 import "server-only";
 
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, max, sql } from "drizzle-orm";
 import { z } from "zod";
 
+import { canSetStatus } from "@/domain/shipment-permissions";
 import { canTransition, SHIPMENT_STATUSES, type ShipmentStatus } from "@/domain/shipment-status";
 import type { AuthContext } from "@/server/auth/auth-context";
 import { getDb, type Transaction } from "@/server/db/client";
 import { shipmentEvents, shipments, type Shipment, type ShipmentEvent } from "@/server/db/schema";
 
-import { notFound, validationFailure, type NotFound, type ValidationFailure } from "./results";
+import {
+  forbidden,
+  notFound,
+  validationFailure,
+  type Forbidden,
+  type NotFound,
+  type ValidationFailure,
+} from "./results";
 import { visibleShipments } from "./shipment-access";
 import { blankToUndefined, optionalCoordinate, optionalText } from "./validation";
 
@@ -49,6 +57,8 @@ export type ChangeShipmentStatusResult =
   | { ok: false; reason: "invalid_transition"; from: ShipmentStatus; to: ShipmentStatus }
   /** Someone else changed the shipment first; `current` is the fresh data to show the user. */
   | { ok: false; reason: "conflict"; current: Shipment }
+  /** The caller can see the shipment but their role may not set this status. */
+  | Forbidden
   | NotFound
   | ValidationFailure;
 
@@ -57,8 +67,11 @@ export type ChangeShipmentStatusResult =
  * the `status_changed` history event, all in one transaction.
  *
  * Who may change what (Phase 1): admins and dispatchers any shipment in their organization, drivers
- * only shipments assigned to them. Anything else is not found, so a driver cannot learn which
- * shipments exist.
+ * only shipments assigned to them, and never to `cancelled` (forbidden, see `canSetStatus`).
+ * Shipments outside the caller's scope are not found, so a driver cannot learn which exist.
+ *
+ * `occurredAt` may be backdated, but not before the shipment's latest event, so the timeline
+ * (ordered by occurred_at) always follows the state machine.
  */
 export async function changeShipmentStatus(
   ctx: AuthContext,
@@ -76,6 +89,8 @@ export async function changeShipmentStatus(
   return getDb().transaction(async (tx): Promise<ChangeShipmentStatusResult> => {
     const current = await findVisibleShipment(tx, ctx, shipmentId);
     if (!current) return notFound;
+    // The shipment is visible to the caller, so saying "not allowed" reveals nothing.
+    if (!canSetStatus(ctx.role, toStatus)) return forbidden;
 
     // Version before transition: if the user's form is stale, the transition they picked was based
     // on a status that no longer holds, so "someone else changed this" is the useful answer.
@@ -83,6 +98,24 @@ export async function changeShipmentStatus(
     if (!canTransition(current.status, toStatus)) {
       return { ok: false, reason: "invalid_transition", from: current.status, to: toStatus };
     }
+
+    // Read inside the transaction: a concurrent change that adds a later event also bumps the
+    // version, so the guarded UPDATE below rejects us and this check cannot go stale.
+    const latestOccurredAt = await latestEventTime(tx, ctx, shipmentId);
+    if (occurredAt && latestOccurredAt && occurredAt < latestOccurredAt) {
+      return {
+        ok: false,
+        reason: "validation",
+        fieldErrors: {
+          occurredAt: [`Must be after the previous update (${latestOccurredAt.toISOString()})`],
+        },
+      };
+    }
+    // Defaulting to now could still land before an event recorded with a slightly fast device
+    // clock (see MAX_CLOCK_SKEW_MS); never order the new event before it.
+    const now = new Date();
+    const eventTime =
+      occurredAt ?? (latestOccurredAt && latestOccurredAt > now ? latestOccurredAt : now);
 
     // The version check above is only a fast path for stale forms. This guarded UPDATE is what
     // actually prevents lost updates: if a concurrent transaction changed the row after our read,
@@ -114,7 +147,7 @@ export async function changeShipmentStatus(
         // has not changed in between.
         fromStatus: current.status,
         toStatus,
-        occurredAt: occurredAt ?? new Date(),
+        occurredAt: eventTime,
         actorUserId: ctx.userId,
         locationCity: location?.city,
         locationLat: location?.lat,
@@ -139,4 +172,21 @@ async function findVisibleShipment(
     .where(and(eq(shipments.id, shipmentId), visibleShipments(ctx)))
     .limit(1);
   return shipment;
+}
+
+async function latestEventTime(
+  tx: Transaction,
+  ctx: AuthContext,
+  shipmentId: string,
+): Promise<Date | null> {
+  const [row] = await tx
+    .select({ latest: max(shipmentEvents.occurredAt) })
+    .from(shipmentEvents)
+    .where(
+      and(
+        eq(shipmentEvents.shipmentId, shipmentId),
+        eq(shipmentEvents.organizationId, ctx.organizationId),
+      ),
+    );
+  return row?.latest ?? null;
 }
