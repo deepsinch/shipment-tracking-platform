@@ -16,3 +16,25 @@ export function formatDateTime(value: Date): string {
 export function formatDate(value: Date): string {
   return date.format(value);
 }
+
+const regionNames = new Intl.DisplayNames(["en"], { type: "region" });
+
+/** "NL" -> "Netherlands". Falls back to the code itself if the runtime does not know it. */
+export function formatCountry(code: string): string {
+  try {
+    return regionNames.of(code) ?? code;
+  } catch {
+    return code;
+  }
+}
+
+/** "Rotterdam, Netherlands". */
+export function formatPlace(city: string, countryCode: string): string {
+  return `${city}, ${formatCountry(countryCode)}`;
+}
+
+const weight = new Intl.NumberFormat("en-GB", { maximumFractionDigits: 2 });
+
+export function formatWeight(kg: number): string {
+  return `${weight.format(kg)} kg`;
+}

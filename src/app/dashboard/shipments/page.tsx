@@ -250,7 +250,7 @@ function EmptyState({ filtered, canCreate }: { filtered: boolean; canCreate: boo
       ) : (
         canCreate && (
           <Button asChild>
-            <Link href="/dashboard/shipments/new">New shipment</Link>
+            <Link href="/dashboard/shipments/new">Create a shipment</Link>
           </Button>
         )
       )}
