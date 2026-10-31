@@ -7,12 +7,18 @@ import { allowedNextStatuses, type ShipmentStatus } from "./shipment-status";
  * See docs/architecture.md, "Shipment access".
  *
  * Phase 1 rules:
- * - Admins and dispatchers create shipments and see and change every shipment in their organization.
+ * - Admins and dispatchers create shipments, assign drivers, and see and change every shipment in
+ *   their organization.
  * - Drivers cannot create shipments; they see and change only shipments assigned to them, and
  *   cannot cancel a shipment (a commercial decision for the office, not the road).
  */
 
 export function canCreateShipments(role: Role): boolean {
+  return role === "admin" || role === "dispatcher";
+}
+
+/** Whether the role may assign drivers to shipments (and so list the organization's drivers). */
+export function canAssignDrivers(role: Role): boolean {
   return role === "admin" || role === "dispatcher";
 }
 
