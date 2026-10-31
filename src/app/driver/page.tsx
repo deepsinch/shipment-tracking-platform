@@ -2,6 +2,7 @@ import { ChevronRightIcon, PackageCheckIcon } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 
+import { LiveRefresh } from "@/components/realtime/live-refresh";
 import { StatusBadge } from "@/components/status-badge";
 import { nextStopFor } from "@/domain/driver-tasks";
 import { formatPlace } from "@/lib/format";
@@ -24,6 +25,7 @@ export default async function DriverHomePage() {
 
   return (
     <main className="flex flex-col gap-8">
+      <LiveRefresh />
       <div className="flex flex-col gap-1">
         <h1 className="text-2xl font-semibold tracking-tight">My shipments</h1>
         <p className="text-sm text-muted-foreground">

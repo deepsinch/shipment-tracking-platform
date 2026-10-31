@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { changeStatus, createShipment, signUp } from "./helpers";
+import { changeStatus, createShipment, signUp, withoutLiveUpdates } from "./helpers";
 
 test("a dispatcher books and advances a shipment; the customer sees only public details", async ({
   page,
@@ -56,7 +56,9 @@ test("a stale status form reports the conflict, shows fresh data and can be retr
   await createShipment(page);
 
   // A second tab opened on the same shipment, which goes stale once the first tab changes it.
+  // Without live updates: otherwise it might refresh before the user submits.
   const staleTab = await context.newPage();
+  await withoutLiveUpdates(staleTab);
   await staleTab.goto(page.url());
   await expect(staleTab.getByLabel("New status")).toBeVisible();
 

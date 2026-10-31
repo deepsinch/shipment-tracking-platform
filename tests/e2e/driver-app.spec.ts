@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { addDriver, createShipment, signIn, signUp } from "./helpers";
+import { addDriver, createShipment, signIn, signUp, withoutLiveUpdates } from "./helpers";
 
 test("a dispatcher assigns a driver, who advances the shipment from the driver app", async ({
   page,
@@ -71,7 +71,9 @@ test("a stale driver form reports the conflict and keeps the chosen driver", asy
   await addDriver(adminEmail, "Bea Driver");
   await page.reload();
 
+  // Without live updates: otherwise it might refresh before the user submits.
   const staleTab = await context.newPage();
+  await withoutLiveUpdates(staleTab);
   await staleTab.goto(page.url());
   await expect(staleTab.getByLabel("Assigned driver")).toBeVisible();
 

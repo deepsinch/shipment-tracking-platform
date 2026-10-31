@@ -1,5 +1,7 @@
 import { Suspense } from "react";
 
+import { LiveIndicator } from "@/components/realtime/live-indicator";
+import { RealtimeProvider } from "@/components/realtime/realtime-provider";
 import { SiteHeader } from "@/components/site-header";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -10,7 +12,7 @@ import { signOutAction } from "../(auth)/actions";
 /**
  * The driver app: a narrow, phone-first column. As in the dashboard, the session is read inside
  * <Suspense> and every page repeats the check (`requireAuthContextOn("/driver")`), which also
- * sends staff back to the dashboard.
+ * sends staff back to the dashboard. The realtime connection lives here, across client navigations.
  */
 export default function DriverLayout({ children }: LayoutProps<"/driver">) {
   return (
@@ -25,17 +27,20 @@ async function DriverShell({ children }: { children: React.ReactNode }) {
   const user = await getCurrentUser();
 
   return (
-    <div className="flex flex-1 flex-col bg-muted/40">
-      <SiteHeader>
-        <span className="hidden text-muted-foreground sm:inline">{user?.name} · Driver</span>
-        <form action={signOutAction}>
-          <Button type="submit" variant="outline" size="sm">
-            Sign out
-          </Button>
-        </form>
-      </SiteHeader>
-      <div className="mx-auto w-full max-w-xl flex-1 px-4 py-6">{children}</div>
-    </div>
+    <RealtimeProvider>
+      <div className="flex flex-1 flex-col bg-muted/40">
+        <SiteHeader>
+          <LiveIndicator />
+          <span className="hidden text-muted-foreground sm:inline">{user?.name} · Driver</span>
+          <form action={signOutAction}>
+            <Button type="submit" variant="outline" size="sm">
+              Sign out
+            </Button>
+          </form>
+        </SiteHeader>
+        <div className="mx-auto w-full max-w-xl flex-1 px-4 py-6">{children}</div>
+      </div>
+    </RealtimeProvider>
   );
 }
 

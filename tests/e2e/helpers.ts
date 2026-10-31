@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { randomInt, randomUUID } from "node:crypto";
 import { promisify } from "node:util";
 
 import { expect, type Page } from "@playwright/test";
@@ -16,9 +16,16 @@ const PASSWORD = "correct-horse-battery";
 /**
  * Signs up a new user, who becomes the admin of a new company, and lands on the shipment list.
  * Returns their email.
+ *
+ * Each test's company is a different customer, so its browser context gets its own client
+ * address (TEST-NET-3, reserved for documentation) in `x-forwarded-for`, the header the app's
+ * rate limits trust from the platform proxy. Otherwise the suite's sign-ups would share one
+ * address and hit the limit of 10 sign-ups per IP per hour.
  */
 export async function signUp(page: Page, name = "Erin Dispatcher"): Promise<string> {
   const email = `e2e-${randomUUID()}@example.test`;
+  const clientIp = `203.0.113.${randomInt(1, 255)}`;
+  await page.context().setExtraHTTPHeaders({ "x-forwarded-for": clientIp });
   await page.goto("/sign-up");
   await page.getByLabel("Your name", { exact: true }).fill(name);
   await page.getByLabel("Email", { exact: true }).fill(email);
@@ -27,6 +34,20 @@ export async function signUp(page: Page, name = "Erin Dispatcher"): Promise<stri
   await page.getByRole("button", { name: "Create account" }).click();
   await expect(page.getByRole("heading", { name: "Shipments", level: 1 })).toBeVisible();
   return email;
+}
+
+/**
+ * Cuts the page off from live updates (`/api/realtime`), for tests about what happens when a tab
+ * did not hear about a change in time: optimistic concurrency, not realtime, is the guarantee.
+ * Call it before the page navigates.
+ */
+export async function withoutLiveUpdates(page: Page): Promise<void> {
+  await page.route("**/api/realtime", (route) => route.abort());
+}
+
+/** Waits until the page's realtime connection is established (the header's Live indicator). */
+export async function expectLive(page: Page): Promise<void> {
+  await expect(page.getByTestId("live-indicator")).toHaveAttribute("data-status", "live");
 }
 
 /** Signs in with the shared e2e password; where the user lands depends on their role. */

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { cache } from "react";
 
+import { LiveRefresh } from "@/components/realtime/live-refresh";
 import { ShipmentHistory } from "@/components/shipment-history";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
@@ -42,6 +43,8 @@ export default async function DriverShipmentPage({ params }: PageProps<"/driver/
 
   return (
     <main className="flex flex-col gap-4">
+      {/* Reassigned away from this driver, the refresh shows "not found", which is the truth. */}
+      <LiveRefresh shipmentId={shipment.id} />
       <div className="flex flex-col gap-2">
         <Link
           href="/driver"

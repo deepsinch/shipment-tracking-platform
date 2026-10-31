@@ -55,6 +55,8 @@ export function DriverStatusForm({ shipmentId, trackingCode, version, status, op
           action={action}
           onSubmit={confirmation.onSubmit}
           noValidate
+          // A live refresh that brings a new version remounts this form; wait while it has input.
+          data-unsaved-guard
           className="flex flex-col gap-4"
         >
           <input type="hidden" name="shipmentId" value={shipmentId} />

@@ -4,19 +4,24 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { cache } from "react";
 
+import { LiveRefresh } from "@/components/realtime/live-refresh";
 import { StatusBadge } from "@/components/status-badge";
 import { ShipmentHistory } from "@/components/shipment-history";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SERVICE_LEVEL_LABELS } from "@/domain/service-level";
 import { canAssignDrivers, canChangeDriver, statusOptionsFor } from "@/domain/shipment-permissions";
+import { isTerminalStatus } from "@/domain/shipment-status";
 import { formatDateTime, formatPlace, formatWeight } from "@/lib/format";
-import { requireAuthContextOn } from "@/server/auth/session";
+import type { LivePosition } from "@/components/realtime/use-live-position";
+import { requireAuthContextOn, type AuthContext } from "@/server/auth/session";
 import type { Shipment } from "@/server/db/schema";
 import { getShipment } from "@/server/services/get-shipment";
+import { getShipmentPositions } from "@/server/services/get-shipment-positions";
 import { listDrivers } from "@/server/services/list-drivers";
 
 import { AssignDriverForm } from "./assign-driver-form";
+import { LastSeen } from "./last-seen";
 import { StatusChangeForm } from "./status-change-form";
 
 /** One lookup per request, shared by the metadata and the page. Not found ends both. */
@@ -40,9 +45,11 @@ export default async function ShipmentPage({ params }: PageProps<"/dashboard/shi
   // Only staff reach this page, but the role rule decides, not the route.
   const driverList = canAssignDrivers(ctx.role) ? await listDrivers(ctx) : null;
   const drivers = driverList?.ok ? driverList.drivers : null;
+  const lastPosition = await loadLastPosition(ctx, shipment);
 
   return (
     <main className="flex flex-col gap-6">
+      <LiveRefresh shipmentId={shipment.id} />
       <div className="flex flex-col gap-2">
         <Link
           href="/dashboard/shipments"
@@ -77,6 +84,7 @@ export default async function ShipmentPage({ params }: PageProps<"/dashboard/shi
         <ShipmentDetails
           shipment={shipment}
           assignedDriverName={assignedDriverName}
+          lastPosition={lastPosition}
           className="lg:col-span-2"
         />
         <div className="flex flex-col gap-6 lg:col-start-3 lg:row-span-2 lg:row-start-1">
@@ -128,13 +136,31 @@ export default async function ShipmentPage({ params }: PageProps<"/dashboard/shi
   );
 }
 
+/**
+ * The latest position for the "Last seen" line, or undefined when the line is not shown: a
+ * finished shipment's last position no longer matters (the snapshot leaves it out too).
+ */
+async function loadLastPosition(
+  ctx: AuthContext,
+  shipment: Shipment,
+): Promise<LivePosition | null | undefined> {
+  if (isTerminalStatus(shipment.status)) return undefined;
+  const result = await getShipmentPositions(ctx, { shipmentIds: [shipment.id] });
+  const position = result.ok ? result.positions[0] : undefined;
+  return position
+    ? { lat: position.lat, lng: position.lng, recordedAt: position.recordedAt.toISOString() }
+    : null;
+}
+
 function ShipmentDetails({
   shipment,
   assignedDriverName,
+  lastPosition,
   className,
 }: {
   shipment: Shipment;
   assignedDriverName: string | null;
+  lastPosition: LivePosition | null | undefined;
   className?: string;
 }) {
   return (
@@ -173,6 +199,11 @@ function ShipmentDetails({
             )}
           </Detail>
           <Detail label="Driver">{assignedDriverName ?? "Not assigned"}</Detail>
+          {lastPosition !== undefined && (
+            <Detail label="Last seen">
+              <LastSeen shipmentId={shipment.id} initial={lastPosition} />
+            </Detail>
+          )}
           <Detail label="Weight">{formatWeight(shipment.weightKg)}</Detail>
           <Detail label="Service level">{SERVICE_LEVEL_LABELS[shipment.serviceLevel]}</Detail>
           <Detail label="Promised delivery">

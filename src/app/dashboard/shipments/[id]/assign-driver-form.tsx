@@ -31,7 +31,14 @@ export function AssignDriverForm({ shipmentId, version, assignedDriverId, driver
   return (
     <div className="flex flex-col gap-4">
       <ActionMessage state={state} />
-      <form key={version} action={action} noValidate className="flex flex-col gap-4">
+      {/* A live refresh that brings a new version remounts this form; wait while it has input. */}
+      <form
+        key={version}
+        action={action}
+        noValidate
+        data-unsaved-guard
+        className="flex flex-col gap-4"
+      >
         <input type="hidden" name="shipmentId" value={shipmentId} />
         <input type="hidden" name="expectedVersion" value={version} />
         <SelectField
