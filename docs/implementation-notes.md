@@ -11,9 +11,39 @@ Work proceeds in reviewable checkpoints: (1) scaffold + tooling, (2) DB, (3) aut
 (4) services + integration tests, (5) UI, (6) seed + e2e + README + docs. Finish one, get it green,
 commit, stop for architect review.
 
-**Checkpoint reached: 4 (services + integration tests).** format:check, lint, typecheck, test
-(56 unit + 70 integration) and build pass. Next: checkpoint 5 (UI and the thin Server Action /
-page wiring that calls the services).
+**Checkpoint reached: 5a (review fixes, shadcn/ui, landing, auth restyle, dashboard list).**
+format:check, lint, typecheck, test (59 unit + 75 integration) and build pass.
+
+Checkpoint 5 is split in two. Done in 5a:
+
+- Review fixes: drivers cannot set `cancelled` (`canSetStatus` / `statusOptionsFor` in
+  `src/domain/shipment-permissions.ts`, `forbidden` from `changeShipmentStatus`); a backdated
+  `occurredAt` must not be before the shipment's latest event (validation error on `occurredAt`).
+- shadcn/ui set up with the CLI (`radix-nova` style, neutral, CSS variables, lucide icons).
+- `/` landing page with a "Track a shipment" form (Server Action `trackShipmentAction` normalizes the
+  code and redirects to `/track/<code>`; works without JavaScript).
+- `/sign-in`, `/sign-up` restyled in an `(auth)` layout with cards.
+- Dashboard shell (header, nav, role, sign out); `/dashboard` redirects to `/dashboard/shipments`.
+- `/dashboard/shipments`: table with status badges, search + status filter as a GET form, URL
+  pagination, empty states (none yet / no match), `loading.tsx`. Bad params redirect to the
+  unfiltered list.
+
+**Next, checkpoint 5b (not started):**
+
+- [ ] `/dashboard/shipments/new`: Server Action -> `createShipment`, field errors via `FieldShell`
+      / `TextField` / `SelectField` (`src/components/form-field.tsx`), echo values back (React 19
+      form reset), driver select (needs a small `listDrivers(ctx)` service), page hidden from
+      drivers (`canCreateShipments`), `revalidatePath("/dashboard/shipments")`, redirect to detail.
+- [ ] `/dashboard/shipments/[id]`: details, timeline with actor names (add a left join on `user`
+      in `getShipment`), status form offering `statusOptionsFor(role, status)`, hidden
+      `expectedVersion`; on `conflict` show `current` and a retry; handle `invalid_transition`,
+      `forbidden` and field errors; `loading.tsx`; `notFound()` for not_found.
+- [ ] `/track/[code]`: `getPublicTracking`, `generateMetadata`, `robots: { index: false }`,
+      friendly not-found, `loading.tsx`.
+- [ ] Playwright: `playwright.config.ts` with `launchOptions.executablePath:
+    "/opt/pw-browsers/chromium"`, `test:e2e` script that builds and starts the app against a
+      dedicated e2e database (e.g. `waybill_e2e`, migrated in global setup), one happy path
+      (sign up, create, advance status, public page shows the timeline).
 
 Done:
 
@@ -201,6 +231,24 @@ drizzle-orm 0.45.4, drizzle-kit 0.31.11, pg 8.23, zod 4.6.7, @playwright/test 1.
   in checkpoint 5: add a left join on `user` there.
 - Reference search is `ILIKE '%term%'`, which no index serves; fine at small-carrier scale within
   one organization's rows. A `pg_trgm` index is the fix if it ever matters.
+
+### UI (checkpoint 5a)
+
+- **shadcn CLI needs the NO_PROXY workaround** (`pnpm dlx shadcn@4.23.0 ...` fails with ENOTFOUND
+  otherwise). Add components with `pnpm dlx shadcn@4.23.0 add <name>`, then run Prettier
+  (generated files have no semicolons).
+- **Generated components import `cn` from the `cn` package** (shadcn's own clsx + tailwind-merge
+  replacement, repo `shadcn-ui/cn`); `src/lib/utils.ts` re-exports it. `shadcn` is a runtime
+  dependency because `globals.css` imports `shadcn/tailwind.css`.
+- **Theme font:** the theme maps `--font-sans` to itself, so the Geist font in `layout.tsx` must
+  set the CSS variable `--font-sans` (it was `--font-geist-sans`).
+- **Form errors:** use `FieldShell` / `TextField` from `src/components/form-field.tsx`, not shadcn's
+  `FieldError`, which puts `role="alert"` on every field. Fields get `aria-invalid` and
+  `aria-describedby`; the form shows one `FormAlert` (`data-testid="form-alert"`, role alert).
+- **Dates** render in UTC with a "UTC" label (`src/lib/format.ts`); per-org time zones are later.
+- Filters are a plain GET form, so the list works without JavaScript and URLs are shareable.
+- The dev database `waybill` has a throwaway org from a visual check (`visual-*@example.test`,
+  password `password123`, 24 rows); harmless, wiped by any reseed.
 
 ### Testing
 
