@@ -196,3 +196,33 @@ user's notes survive; a status that is no longer valid resets to "Choose a statu
 
 **Proof.** An end-to-end test drives two tabs: the stale tab's update is rejected, it shows the
 other user's change, and the retry succeeds. Removing the revalidation makes the test fail.
+
+## Rate limiting sign-in on serverless hosting
+
+**Problem.** Sign-in had no brute-force protection: Better Auth's limiter only covers its HTTP
+handler, and the app's Server Actions call its API directly. On serverless hosting many short-lived
+instances run at once, so the limit has to be shared.
+
+**Approach** ([`rate-limit.ts`](../src/server/auth/rate-limit.ts),
+[`sign-in.ts`](../src/server/auth/sign-in.ts)): fixed-window counters in Postgres, one atomic
+`INSERT ... ON CONFLICT DO UPDATE` per attempt, where a `CASE` either restarts an expired window or
+increments the count.
+
+- Attempts are counted before the password check, so parallel guessing cannot outrun the counter
+  and an unknown email gets the same answer as a wrong password. A test fires 8 parallel attempts at
+  a limit of 3 and exactly 3 get through.
+- Limits: 5 per email+IP per 15 minutes (cleared by a successful sign-in), 30 per IP per 15 minutes,
+  10 sign-ups per IP per hour.
+- Keys are SHA-256 hashes, so the table never stores emails or IP addresses in clear.
+
+**Options considered.**
+
+- In-memory map: resets on every cold start and each instance allows the full limit.
+- Redis/Upstash: ideal at scale, but another service to run for a small product.
+- Sliding window: more state, to avoid at most 2x the limit at a window boundary.
+- Count only after a failure: concurrent requests all slip past the check.
+- Route sign-in through Better Auth's handler: loses the no-JavaScript Server Action form flow.
+
+**Known tradeoff.** Keying the account limit on email + IP means a botnet rotating IPs still gets a
+few guesses per IP. A per-email limit stops that but lets anyone lock a victim out of their account;
+the planned answer is a looser per-email cap plus breached-password checks.

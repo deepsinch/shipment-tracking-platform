@@ -285,6 +285,10 @@ drizzle-orm 0.45.4, drizzle-kit 0.31.11, pg 8.23, zod 4.6.7, @playwright/test 1.
 - **The client IP trusts `x-forwarded-for`.** Correct behind Vercel or another proxy that sets it;
   a self-hosted deployment without such a proxy lets clients choose their IP for the per-IP limits
   (the per-account sign-in limit still holds per IP chosen). Documented in `client-ip.ts`.
+- **Distributed password guessing.** The per-account sign-in limit is keyed on email + IP, so an
+  attacker rotating many IPs gets 5 guesses per IP per account. A per-email limit (any IP) would stop
+  that but lets anyone lock a victim out. Planned fix: a looser per-email cap (e.g. 20/hour) plus
+  breached-password checks at sign-up; at scale, CAPTCHA after repeated failures.
 - **Seeded dates age.** The demo seed is a one-off; rerun `pnpm db:seed --reset` locally for fresh
   "recent" dates. A hosted demo will need a scheduled reset (Phase 4).
 - `notFound()` on dynamic pages streams a 200 with `noindex` (see checkpoint 5b gotchas).
