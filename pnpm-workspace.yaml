@@ -1,0 +1,6 @@
+# Native build scripts pnpm should skip. esbuild ships its platform binary as an
+# optional dependency, so its postinstall check is not needed.
+ignoredBuiltDependencies:
+  - esbuild
+  - sharp
+  - unrs-resolver
