@@ -6,6 +6,7 @@ import { canTransition, isTerminalStatus, SHIPMENT_STATUSES } from "@/domain/shi
 import { getAuth } from "@/server/auth/auth";
 import { getDb } from "@/server/db/client";
 import { member, shipmentEvents, shipments, user } from "@/server/db/schema";
+import { getShipmentPositions } from "@/server/services/get-shipment-positions";
 
 import { DEMO_PASSWORD, DEMO_USERS, seedDemo, type SeedResult } from "./demo-seed";
 
@@ -100,6 +101,29 @@ describe("seedDemo", () => {
     const driversActive = unfinished.filter((shipment) => shipment.assignedDriverId === driver!.id);
     expect(overdue.every((shipment) => shipment.assignedDriverId === driver!.id)).toBe(true);
     expect(driversActive.length).toBeGreaterThan(4);
+  });
+
+  it("gives the demo driver's unfinished shipments a recent last position for the map", async () => {
+    if (result.status !== "seeded") throw new Error("expected a fresh seed");
+    const [dispatcher] = await getDb()
+      .select({ id: user.id })
+      .from(user)
+      .where(eq(user.email, "dispatcher@demo.test"));
+    const snapshot = await getShipmentPositions({
+      userId: dispatcher!.id,
+      organizationId: result.organizationId,
+      role: "dispatcher",
+    });
+    if (!snapshot.ok) throw new Error("unexpected");
+
+    // Every one on the road, plus one exception at the position where it stopped.
+    expect(snapshot.positions.length).toBeGreaterThanOrEqual(6);
+    const statuses = new Set(snapshot.positions.map((position) => position.status));
+    expect(statuses).toContain("exception");
+    expect(statuses).toContain("in_transit");
+    for (const position of snapshot.positions) {
+      expect(position.recordedAt.getTime()).toBeLessThanOrEqual(now.getTime());
+    }
   });
 
   it("is a no-op when run again", async () => {

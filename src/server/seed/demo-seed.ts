@@ -2,6 +2,7 @@ import "server-only";
 
 import { eq } from "drizzle-orm";
 
+import { isLocationSharingStatus } from "@/domain/location-sharing";
 import type { Role } from "@/domain/roles";
 import type { ServiceLevel } from "@/domain/service-level";
 import { isTerminalStatus, type ShipmentStatus } from "@/domain/shipment-status";
@@ -12,12 +13,15 @@ import { getDb } from "@/server/db/client";
 import { user } from "@/server/db/schema";
 import { changeShipmentStatus } from "@/server/services/change-shipment-status";
 import { createShipment } from "@/server/services/create-shipment";
+import { recordLocationPing } from "@/server/services/record-location-ping";
 
 /**
  * Demo data for "Demo Freight Co": three accounts (one per role) and 30 shipments across every
  * status. Everything goes through the real code paths: users through Better Auth (hashed
  * passwords), shipments through `createShipment` and history through `changeShipmentStatus`, so
- * every timeline obeys the state machine, the role rules and the event-time ordering.
+ * every timeline obeys the state machine, the role rules and the event-time ordering. The demo
+ * driver's unfinished shipments get a last known position through `recordLocationPing`, so the
+ * live map has something to show before any simulator runs.
  *
  * Re-running is a no-op once the demo admin exists: history cannot be deleted, so the seed never
  * tries to "refresh" rows. `pnpm db:seed --reset` wipes the local dev database first instead.
@@ -368,10 +372,15 @@ async function seedShipment(
   );
   if (!created.ok) throw new Error(`Seed shipment ${index} rejected: ${JSON.stringify(created)}`);
 
+  // Real-world times of each step, oldest first.
+  const times: Date[] = [];
+  for (const gap of gaps)
+    times.push(roundToMinute(new Date((times.at(-1) ?? createdAt).getTime() + gap)));
+  const lastPing = lastPingMoment(plan, times, { assigned, index, now });
+
   let version = created.shipment.version;
-  let occurredAt = createdAt;
   for (const [step, toStatus] of plan.entries()) {
-    occurredAt = roundToMinute(new Date(occurredAt.getTime() + gaps[step]!));
+    const occurredAt = times[step]!;
     const place =
       toStatus === "out_for_delivery" || toStatus === "delivered" ? destination : origin;
     // Drivers record their own shipments' progress; cancelling is always the office's call.
@@ -390,8 +399,81 @@ async function seedShipment(
       throw new Error(`Seed shipment ${index} -> ${toStatus} rejected: ${JSON.stringify(result)}`);
     }
     version = result.shipment.version;
+
+    if (lastPing?.afterStep === step) {
+      await seedPosition(contexts.driver, created.shipment.id, {
+        origin,
+        destination,
+        status: toStatus,
+        index,
+        recordedAt: lastPing.at,
+      });
+    }
   }
 }
+
+/**
+ * When the demo driver's phone last reported an unfinished shipment: a few minutes ago if it is
+ * still on the road, or shortly before it ran into its exception (pings stop then, and the last
+ * position is what dispatch looks at). Null for everything else.
+ */
+function lastPingMoment(
+  plan: readonly ShipmentStatus[],
+  times: readonly Date[],
+  { assigned, index, now }: { assigned: boolean; index: number; now: Date },
+): { afterStep: number; at: Date } | null {
+  const last = plan.length - 1;
+  if (!assigned || last < 0 || isTerminalStatus(plan[last]!)) return null;
+  if (isLocationSharingStatus(plan[last]!)) {
+    // Varied but deterministic (no draw from the PRNG, so the rest of the seed stays unchanged).
+    return {
+      afterStep: last,
+      at: new Date(now.getTime() - (2 + ((index * 7) % 23)) * 60_000),
+    };
+  }
+  if (plan[last] === "exception" && last > 0 && isLocationSharingStatus(plan[last - 1]!)) {
+    return { afterStep: last - 1, at: new Date(times[last]!.getTime() - 20 * 60_000) };
+  }
+  return null;
+}
+
+/** How far along the straight line from pickup to delivery a shipment in `status` is drawn. */
+function progressFor(status: ShipmentStatus, index: number): number {
+  if (status === "picked_up") return 0.08;
+  if (status === "out_for_delivery") return 0.9;
+  return 0.3 + (index % 5) * 0.1;
+}
+
+async function seedPosition(
+  driver: AuthContext,
+  shipmentId: string,
+  {
+    origin,
+    destination,
+    status,
+    index,
+    recordedAt,
+  }: { origin: City; destination: City; status: ShipmentStatus; index: number; recordedAt: Date },
+): Promise<void> {
+  const progress = progressFor(status, index);
+  const result = await recordLocationPing(
+    driver,
+    {
+      shipmentId,
+      lat: round(origin.lat + (destination.lat - origin.lat) * progress),
+      lng: round(origin.lng + (destination.lng - origin.lng) * progress),
+      accuracyM: 12,
+      recordedAt,
+    },
+    // Received a moment after the fix, as from a phone with a decent connection.
+    { now: () => new Date(recordedAt.getTime() + 3_000) },
+  );
+  if (!result.ok || !result.accepted) {
+    throw new Error(`Seed position for shipment ${index} rejected: ${JSON.stringify(result)}`);
+  }
+}
+
+const round = (degrees: number) => Math.round(degrees * 1e5) / 1e5;
 
 function roundToMinute(date: Date): Date {
   return new Date(Math.floor(date.getTime() / 60_000) * 60_000);
