@@ -20,9 +20,9 @@ Phase 1 delivered, checkpoint by checkpoint:
    handling, public tracking page; Playwright e2e against a dedicated database; README.
 6. Demo seed (`pnpm db:seed`), sign-in/sign-up rate limiting, Phase 1 docs.
 
-**Phase 2 (live tracking) is in progress on branch `phase-2-live-tracking`.** Checkpoint 2 is
-reached: format:check, lint, typecheck, test (99 unit + 162 integration), build and test:e2e
-(9 specs) pass. **Next: checkpoint 3 (realtime).** The design is in `docs/architecture.md`,
+**Phase 2 (live tracking) is in progress on branch `phase-2-live-tracking`.** Checkpoint 3 is
+reached: format:check, lint, typecheck, test (156 unit + 180 integration), build and test:e2e
+(12 specs) pass. **Next: checkpoint 4 (live map).** The design is in `docs/architecture.md`,
 "Phase 2: live tracking"; follow it. Checkpoints, each green and reviewed:
 
 1. **[done] Driver app and reassignment.** `/driver` (mobile-first, assigned shipments, big-button status
@@ -35,13 +35,18 @@ reached: format:check, lint, typecheck, test (99 unit + 162 integration), build 
    `getShipmentPositions` (snapshot for the map), and "Share my location" in the driver app. Also
    in this checkpoint: a confirm step before delivered/cancelled in both surfaces, and seed
    deadlines that are mostly on time.
-3. **Realtime.** `RealtimeBus` with the Postgres `LISTEN`/`pg_notify` implementation on
+3. **[done] Realtime.** `RealtimeBus` with the Postgres `LISTEN`/`pg_notify` implementation on
    `DATABASE_DIRECT_URL`, `pg_notify` inside status, assignment and ping transactions, an SSE route
    handler with auth and org/driver filtering, self-closing before the function time limit, and
    client hooks that `router.refresh()` or update positions. Integration tests: notifications only
-   on commit, cross-org isolation on the stream.
+   on commit, cross-org isolation on the stream. Also: a Live indicator in both headers and the
+   staff detail page's live "Last seen" line.
 4. **Live map.** MapLibre + OpenFreeMap, client-only; dashboard map of active shipments, detail-page
    map with route and latest position; markers update from SSE. E2E with tile requests blocked.
+   Building blocks from checkpoint 3: `useLivePosition(shipmentId, initial)` and `useRealtime` in
+   `src/components/realtime/`, `getShipmentPositions` for the snapshot. The map needs a
+   positions snapshot it can re-fetch on `resync` (a route handler or Server Action over
+   `getShipmentPositions`), since `router.refresh()` does not reach client-held map state.
 5. **Truck simulator.** OSRM route fixtures for the seed's city pairs (committed), a simulator
    script driving active shipments through the services. Phase 2 e2e: a driver advances a shipment
    and the dashboard updates without a reload.
@@ -386,6 +391,63 @@ now - 10 s RETURNING`; no row back means throttled, and only then is the ping in
   throttled-fix retry above, and the unchecked switch (light grey on white, below 3:1 contrast) now
   uses `muted-foreground/80`.
 
+### Realtime (Phase 2, checkpoint 3)
+
+- **Layout.** `src/server/realtime/`: `messages.ts` (Zod union, encode/decode, 8000-byte check),
+  `bus.ts` (interface and signals), `postgres-bus.ts`, `index.ts` (`getRealtimeBus()`, lazy and
+  cached on `globalThis` like the pool), `visibility.ts` (pure filter and client projection),
+  `sse-stream.ts`. Services publish through `src/server/services/realtime-signals.ts`. Route:
+  `src/app/api/realtime/route.ts`. Client: `src/lib/realtime-connection.ts`,
+  `refresh-scheduler.ts`, `unsaved-input.ts`, `realtime-events.ts` (framework-free, unit tested),
+  and `src/components/realtime/` (provider, `useRealtime`, `LiveIndicator`, `LiveRefresh`,
+  `useLivePosition`). Design and decisions 23-26 in the architecture doc.
+- **`DATABASE_DIRECT_URL`** (empty locally, falls back to `DATABASE_URL`). Vitest and the
+  Playwright web server set it explicitly to their own databases, so a value in `.env` can never
+  point a test listener at the dev database (live updates would silently never arrive).
+- **Gotcha: the browser's `open` is not "listening".** The response can start before the bus's
+  `LISTEN` is active. Clients resync on the server's first `resync` event instead, which the bus
+  sends only once the subscription is live. Tests wait for it too before producing events.
+- **Gotcha: proving absence needs a sentinel.** "Org A never receives org B's event" is asserted
+  after a later org A event (the sentinel) arrives: notifications are delivered in commit order
+  over one connection and the stream preserves order. `recordRealtime().flush()` in
+  `tests/integration/realtime.ts` does the same for bus-level tests.
+- **Route tests use real sessions.** `route.integration.test.ts` signs users up through Better Auth,
+  turns `Set-Cookie` into a `cookie` header and calls `GET(new Request(...))`. This works because the
+  handler reads `request.headers`, not `headers()` from `next/headers`.
+- **Killing the listener in tests:** each test bus gets a unique `application_name`; the test finds
+  its backend in `pg_stat_activity` and calls `pg_terminate_backend`.
+- **pg `Client` emits both `error` and `end`** when its backend dies, and an `error` with no listener
+  crashes the process. The bus handles a drop once per connection (a generation counter) and gives
+  abandoned clients a no-op error handler before ending them.
+- **Compression buffers SSE.** Next's `compression` (gzip) holds small chunks; `Cache-Control:
+no-transform` makes it skip the response (checked in `next/dist/compiled/compression`).
+- **Unsaved input and refreshes.** React sets `defaultValue` / `defaultSelected` on uncontrolled
+  fields, so "edited" is simply value differs from default (`isFieldEdited`); a select with no
+  explicit default counts its first option as the default. Echoed values after a failed submit are
+  defaults, not edits. Only forms with `data-unsaved-guard` block refreshes.
+- **Activity and live pages.** A hidden page's effects are cleaned up, so it stops listening;
+  `LiveRefresh` remembers it was hidden (a ref survives) and refreshes when shown again. In
+  development, Strict Mode's double effect makes that one extra refresh on mount.
+- **E2E changes.** The two stale-tab conflict specs call `withoutLiveUpdates(staleTab)` (aborts
+  `/api/realtime`); otherwise the stale tab may refresh before the user submits and the conflict
+  never happens. That is the scenario of a tab whose update has not arrived yet, which the version
+  check still covers. `expectLive(page)` waits for the indicator before producing events.
+- **E2E and the sign-up limit.** With 12 specs the suite passed 10 sign-ups from one address and
+  hit the per-IP limit. `signUp()` now gives each test's browser context its own
+  `x-forwarded-for` (TEST-NET-3, `203.0.113.x`), as distinct customers would have; the limit is
+  unchanged.
+- **Proven-red checks (checkpoint 3):** bus: publishing on the pool instead of the transaction
+  (2 red: commit-only and rollback), no resync after reconnect (1 red), no validation on receipt
+  (1 red). Services: no `previousDriverId` (1 red), announcing every ping (1 red). Route: no org
+  check in `isVisibleTo` (1 red), drivers see the whole org (1 red), no previous-driver rule (1
+  red), stream skipping the filter (2 red). E2E: `LiveRefresh` not refreshing (all 3 realtime
+  specs red). All restored.
+- **Visual check** (Playwright, 390 px and 1280 px, seeded dev data, production build): Live pill
+  in both headers, "Last seen ... near ..." moving live, the deferred notice, "Reconnecting…"
+  after stopping the server. One fix came out of it: the deferred notice rendered at the top of
+  the page, off screen while the dispatcher is scrolled down to the form on a phone; it is now
+  pinned to the bottom of the viewport.
+
 ### Testing
 
 - `pnpm test` runs two Vitest projects: `unit` (`src/**/*.test.ts`) and `integration`
@@ -436,6 +498,20 @@ now - 10 s RETURNING`; no row back means throttled, and only then is the ping in
   only if notes ever need a staff-only level.
 - **Wrong-surface redirects are client-side** (see checkpoint 1 gotchas). A role-aware proxy
   would need the role in the session cookie, which conflicts with decision 8.
+- **Realtime: a role or membership change does not end open streams.** The stream's
+  `AuthContext` is resolved once per connection; a demoted or removed member keeps receiving
+  invalidations (ids and positions of their former scope) until the stream's next reconnect, at
+  most 270 s. Acceptable for invalidations; a revocation signal on the bus would close it sooner.
+- **Realtime: a tiny gap on client navigation.** A page's data is fetched on the server before its
+  `LiveRefresh` subscribes in the browser; a change committed in those milliseconds is not
+  refreshed until the next event or reconnect. The provider could buffer recent events for late
+  subscribers if it ever matters.
+- **Realtime: a deferred refresh after a failed validation.** Submitting drops a deferred refresh
+  because the action re-renders the page; a validation error does not re-render, so the page stays
+  on the older version until the next event (a later submit gets the conflict flow).
+- **"Last seen" shows minutes** (the shared UTC date format), so successive pings within a minute
+  only move the coordinates. A relative "12 s ago" would need a ticking clock; the map will show
+  freshness better.
 
 ## Environment notes
 
