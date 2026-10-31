@@ -7,7 +7,8 @@ import { cache } from "react";
 import { homePathFor, type HomePath } from "@/domain/role-home";
 
 import { getAuth } from "./auth";
-import { resolveAuthContext, type AuthContext } from "./auth-context";
+import type { AuthContext } from "./auth-context";
+import { getAuthContextFromHeaders } from "./request-context";
 
 export type { AuthContext } from "./auth-context";
 
@@ -17,14 +18,9 @@ export type { AuthContext } from "./auth-context";
  * It reads request headers, so with Cache Components it must run inside a `<Suspense>` boundary
  * (a route's `loading.tsx` counts), never at the top level of a layout.
  */
-export const getAuthContext = cache(async (): Promise<AuthContext | null> => {
-  const session = await getAuth().api.getSession({ headers: await headers() });
-  if (!session) return null;
-  return resolveAuthContext({
-    userId: session.user.id,
-    activeOrganizationId: session.session.activeOrganizationId,
-  });
-});
+export const getAuthContext = cache(async (): Promise<AuthContext | null> =>
+  getAuthContextFromHeaders(await headers()),
+);
 
 /**
  * The AuthContext, or a redirect to sign-in. This is the real access check: every protected page,
