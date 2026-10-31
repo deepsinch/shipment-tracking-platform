@@ -1,36 +1,40 @@
 import "server-only";
 
-import { drizzle } from "drizzle-orm/node-postgres";
+import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 
 import * as schema from "./schema";
 
-function databaseUrl(): string {
-  const url = process.env.DATABASE_URL;
-  if (!url) {
-    throw new Error("DATABASE_URL is not set. Copy .env.example to .env (see README).");
-  }
-  return url;
-}
-
-// Reuse one pool across hot reloads in development instead of leaking a pool per reload.
-const globalForDb = globalThis as typeof globalThis & { waybillPool?: Pool };
-
-const pool = globalForDb.waybillPool ?? new Pool({ connectionString: databaseUrl() });
-if (process.env.NODE_ENV !== "production") {
-  globalForDb.waybillPool = pool;
-}
-
-export const db = drizzle({ client: pool, schema });
-
-export type Database = typeof db;
+export type Database = NodePgDatabase<typeof schema> & { $client: Pool };
 /** The `tx` handle passed to `db.transaction(async (tx) => ...)`. */
 export type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 /** Either the root client or a transaction, for helpers that work inside or outside one. */
 export type Executor = Database | Transaction;
 
-/** Closes the pool. For scripts and tests; the Next.js server keeps it open. */
+// Cached on globalThis so development hot reloads reuse one pool instead of leaking a pool each.
+const globalForDb = globalThis as typeof globalThis & { waybillDb?: Database };
+
+/**
+ * Returns the shared Drizzle client, creating the connection pool on first use.
+ *
+ * Creating it lazily (rather than at import time) means modules that import services can be
+ * loaded without DATABASE_URL, e.g. during `next build` in CI. The pool itself only opens
+ * connections when the first query runs.
+ */
+export function getDb(): Database {
+  if (!globalForDb.waybillDb) {
+    const url = process.env.DATABASE_URL;
+    if (!url) {
+      throw new Error("DATABASE_URL is not set. Copy .env.example to .env (see README).");
+    }
+    globalForDb.waybillDb = drizzle({ client: new Pool({ connectionString: url }), schema });
+  }
+  return globalForDb.waybillDb;
+}
+
+/** Closes the pool if one was created. For scripts and tests; the Next.js server keeps it open. */
 export async function closeDb(): Promise<void> {
-  await pool.end();
-  delete globalForDb.waybillPool;
+  const db = globalForDb.waybillDb;
+  delete globalForDb.waybillDb;
+  await db?.$client.end();
 }

@@ -6,7 +6,7 @@ import {
   createTestUser,
   pgErrorCode,
 } from "../../../tests/integration/fixtures";
-import { db } from "./client";
+import { getDb } from "./client";
 import { shipmentEvents, type NewShipmentEvent, type Shipment } from "./schema";
 
 const FOREIGN_KEY_VIOLATION = "23503";
@@ -52,13 +52,15 @@ describe("database constraints", () => {
       const otherOrg = await createTestOrganization("Other Org");
 
       const code = await failureCode(() =>
-        db.insert(shipmentEvents).values(event({ organizationId: otherOrg.id })),
+        getDb()
+          .insert(shipmentEvents)
+          .values(event({ organizationId: otherOrg.id })),
       );
       expect(code).toBe(FOREIGN_KEY_VIOLATION);
     });
 
     it("accepts an event in the shipment's own organization", async () => {
-      await expect(db.insert(shipmentEvents).values(event())).resolves.toBeDefined();
+      await expect(getDb().insert(shipmentEvents).values(event())).resolves.toBeDefined();
     });
   });
 
@@ -90,21 +92,27 @@ describe("database constraints", () => {
   describe("shipment_events", () => {
     it("rejects a location latitude out of range", async () => {
       const code = await failureCode(() =>
-        db.insert(shipmentEvents).values(event({ locationLat: -90.5 })),
+        getDb()
+          .insert(shipmentEvents)
+          .values(event({ locationLat: -90.5 })),
       );
       expect(code).toBe(CHECK_VIOLATION);
     });
 
     it("rejects a location longitude out of range", async () => {
       const code = await failureCode(() =>
-        db.insert(shipmentEvents).values(event({ locationLng: 200 })),
+        getDb()
+          .insert(shipmentEvents)
+          .values(event({ locationLng: 200 })),
       );
       expect(code).toBe(CHECK_VIOLATION);
     });
 
     it("rejects a status change without a target status", async () => {
       const code = await failureCode(() =>
-        db.insert(shipmentEvents).values(event({ toStatus: null })),
+        getDb()
+          .insert(shipmentEvents)
+          .values(event({ toStatus: null })),
       );
       expect(code).toBe(CHECK_VIOLATION);
     });

@@ -7,7 +7,7 @@ import {
   createTestUser,
   pgErrorCode,
 } from "../../../tests/integration/fixtures";
-import { db } from "./client";
+import { getDb } from "./client";
 import { shipmentEvents, type Shipment } from "./schema";
 
 const RESTRICT_VIOLATION = "23001";
@@ -34,10 +34,10 @@ describe("shipment_events is append-only", () => {
   });
 
   const eventsFor = (shipmentId: string) =>
-    db.select().from(shipmentEvents).where(eq(shipmentEvents.shipmentId, shipmentId));
+    getDb().select().from(shipmentEvents).where(eq(shipmentEvents.shipmentId, shipmentId));
 
   it("allows INSERT", async () => {
-    await db.insert(shipmentEvents).values({
+    await getDb().insert(shipmentEvents).values({
       organizationId: shipment.organizationId,
       shipmentId: shipment.id,
       type: "status_changed",
@@ -54,7 +54,7 @@ describe("shipment_events is append-only", () => {
 
   it("rejects UPDATE and leaves the row unchanged", async () => {
     const code = await failureCode(() =>
-      db
+      getDb()
         .update(shipmentEvents)
         .set({ publicNote: "rewritten history" })
         .where(eq(shipmentEvents.shipmentId, shipment.id)),
@@ -69,7 +69,7 @@ describe("shipment_events is append-only", () => {
     const before = await eventsFor(shipment.id);
 
     const code = await failureCode(() =>
-      db.delete(shipmentEvents).where(eq(shipmentEvents.shipmentId, shipment.id)),
+      getDb().delete(shipmentEvents).where(eq(shipmentEvents.shipmentId, shipment.id)),
     );
     expect(code).toBe(RESTRICT_VIOLATION);
 
@@ -77,13 +77,13 @@ describe("shipment_events is append-only", () => {
   });
 
   it("rejects TRUNCATE, which bypasses row-level triggers", async () => {
-    const code = await failureCode(() => db.execute(sql`TRUNCATE shipment_events`));
+    const code = await failureCode(() => getDb().execute(sql`TRUNCATE shipment_events`));
     expect(code).toBe(RESTRICT_VIOLATION);
   });
 
   it("explains why in the error message", async () => {
     await expect(
-      db.delete(shipmentEvents).where(eq(shipmentEvents.shipmentId, shipment.id)),
+      getDb().delete(shipmentEvents).where(eq(shipmentEvents.shipmentId, shipment.id)),
     ).rejects.toSatisfy((error: unknown) =>
       /append-only: DELETE is not allowed/.test(String((error as Error).cause ?? error)),
     );

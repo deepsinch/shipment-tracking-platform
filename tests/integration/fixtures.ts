@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import { generateTrackingCode } from "@/domain/tracking-code";
-import { db } from "@/server/db/client";
+import { getDb } from "@/server/db/client";
 import { member, organization, shipmentEvents, shipments, user } from "@/server/db/schema";
 import type { NewShipment, Shipment } from "@/server/db/schema";
 
@@ -12,7 +12,7 @@ import type { NewShipment, Shipment } from "@/server/db/schema";
 
 export async function createTestOrganization(name = "Test Org") {
   const id = randomUUID();
-  const [org] = await db
+  const [org] = await getDb()
     .insert(organization)
     .values({ id, name, slug: `test-${id}`, createdAt: new Date() })
     .returning();
@@ -24,11 +24,11 @@ export async function createTestUser(
   role: "admin" | "dispatcher" | "driver" = "dispatcher",
 ) {
   const id = randomUUID();
-  const [created] = await db
+  const [created] = await getDb()
     .insert(user)
     .values({ id, name: `Test ${role}`, email: `${id}@example.test` })
     .returning();
-  await db
+  await getDb()
     .insert(member)
     .values({ id: randomUUID(), organizationId, userId: id, role, createdAt: new Date() });
   return created!;
@@ -40,7 +40,7 @@ export async function createTestShipment(
   createdBy: string,
   overrides: Partial<NewShipment> = {},
 ): Promise<Shipment> {
-  const [shipment] = await db
+  const [shipment] = await getDb()
     .insert(shipments)
     .values({
       organizationId,
@@ -57,7 +57,7 @@ export async function createTestShipment(
       ...overrides,
     })
     .returning();
-  await db.insert(shipmentEvents).values({
+  await getDb().insert(shipmentEvents).values({
     organizationId,
     shipmentId: shipment!.id,
     type: "created",
