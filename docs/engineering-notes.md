@@ -173,3 +173,26 @@ real guard deleted.
 
 **At scale.** The same pattern works across services and APIs by exposing the version as an ETag
 and requiring `If-Match` on updates (HTTP 412 on conflict), which is the plan for the public API.
+
+## What the user sees when they lose a race
+
+**Problem.** Optimistic concurrency rejects a stale update, but rejecting is only half the job. The
+user who lost needs to see what changed and retry safely, without retyping their notes.
+
+**Approach** ([`actions.ts`](../src/app/dashboard/shipments/actions.ts),
+[`status-change-form.tsx`](../src/app/dashboard/shipments/[id]/status-change-form.tsx)): on a
+conflict the Server Action returns a message plus the user's typed values and revalidates the page.
+The server re-renders the fresh shipment and history, and the form is keyed on `version`, so it
+remounts with the new expected version and only the transitions valid from the new status. The
+user's notes survive; a status that is no longer valid resets to "Choose a status".
+
+**Options considered.**
+
+- Patch the UI on the client from the conflict payload: duplicates server rendering, and the history
+  would still be stale.
+- `router.refresh()` from the client: an extra round trip and more client logic.
+- Silently retry with the new version: a lost update in disguise.
+- Pessimistic locking: cannot span the time a person spends thinking.
+
+**Proof.** An end-to-end test drives two tabs: the stale tab's update is rejected, it shows the
+other user's change, and the retry succeeds. Removing the revalidation makes the test fail.

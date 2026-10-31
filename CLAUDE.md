@@ -48,6 +48,10 @@ src/
   optimistically but is never the only check.
 - Cache Components is on: read cookies, headers, `params` and `searchParams` only inside a `<Suspense>`
   boundary; dynamic routes get a `loading.tsx`.
+- Times are stored as `timestamptz` and shown in UTC with a "UTC" label everywhere (forms read
+  `datetime-local` as UTC) until per-organization time zones exist.
+- Server Actions map every service result kind to a user-facing state (never a generic error), and
+  echo back non-secret submitted values so nothing typed is lost.
 - Importing a module must not require environment variables (e.g. the DB pool is created lazily), so
   `next build` works without a database.
 
@@ -117,6 +121,8 @@ src/
 - Postgres 16 is installed but stopped: `service postgresql start`, then create the role and the
   `waybill` / `waybill_test` databases with the SQL in `.env.example`. Copy `.env.example` to `.env`.
   `pnpm test` needs both: its integration project wipes and re-migrates the `*_test` database.
+- Three databases: `waybill` (dev), `waybill_test` (integration, wiped every run, name must end in `_test`)
+  and `waybill_e2e` (`E2E_DATABASE_URL`, wiped by `test:e2e`, name must end in `_e2e`, created on first run).
 - Playwright: use the preinstalled chromium at `/opt/pw-browsers/chromium`
   (via `launchOptions.executablePath`). Never run `playwright install`.
 - Docker is unavailable.
@@ -127,19 +133,19 @@ src/
 
 ## Commands
 
-| Script               | Purpose                                                               |
-| -------------------- | --------------------------------------------------------------------- |
-| `pnpm dev`           | Next.js dev server                                                    |
-| `pnpm build`         | Production build                                                      |
-| `pnpm lint`          | ESLint                                                                |
-| `pnpm typecheck`     | `next typegen` then `tsc --noEmit` (typegen creates route prop types) |
-| `pnpm test`          | Vitest: unit + integration (integration needs Postgres and `.env`)    |
-| `pnpm format:check`  | Prettier check (`pnpm format` to fix)                                 |
-| `pnpm db:generate`   | Generate a migration from the Drizzle schema                          |
-| `pnpm db:migrate`    | Apply migrations to `DATABASE_URL`                                    |
-| `pnpm auth:generate` | Regenerate Better Auth tables; must be a no-op on a clean tree        |
-| `pnpm test:e2e`      | Playwright end-to-end (added in checkpoint 5)                         |
-| `pnpm db:seed`       | Re-runnable demo seed, "Demo Freight Co" (added in checkpoint 6)      |
+| Script               | Purpose                                                                 |
+| -------------------- | ----------------------------------------------------------------------- |
+| `pnpm dev`           | Next.js dev server                                                      |
+| `pnpm build`         | Production build                                                        |
+| `pnpm lint`          | ESLint                                                                  |
+| `pnpm typecheck`     | `next typegen` then `tsc --noEmit` (typegen creates route prop types)   |
+| `pnpm test`          | Vitest: unit + integration (integration needs Postgres and `.env`)      |
+| `pnpm format:check`  | Prettier check (`pnpm format` to fix)                                   |
+| `pnpm db:generate`   | Generate a migration from the Drizzle schema                            |
+| `pnpm db:migrate`    | Apply migrations to `DATABASE_URL`                                      |
+| `pnpm auth:generate` | Regenerate Better Auth tables; must be a no-op on a clean tree          |
+| `pnpm test:e2e`      | Playwright: prepares `waybill_e2e`, builds, starts on :3100, runs specs |
+| `pnpm db:seed`       | Re-runnable demo seed, "Demo Freight Co" (added in checkpoint 6)        |
 
-Done criteria for every checkpoint: lint, typecheck, format:check, test and build pass; test:e2e too
-once it exists.
+Done criteria for every checkpoint: format:check, lint, typecheck, test, build and test:e2e all pass,
+with a clean tree.
