@@ -145,22 +145,26 @@ src/
   `pnpm view next version` should print a version. If installs fail with `ENOTFOUND`, remove
   `registry.npmjs.org` from `NO_PROXY`, `no_proxy` and `npm_config_noproxy` for that command only
   (details in `docs/implementation-notes.md`).
+- Node's built-in `fetch` ignores `HTTPS_PROXY` unless run with `NODE_USE_ENV_PROXY=1` (needed for
+  `pnpm routes:fetch` here).
 
 ## Commands
 
-| Script               | Purpose                                                                      |
-| -------------------- | ---------------------------------------------------------------------------- |
-| `pnpm dev`           | Next.js dev server                                                           |
-| `pnpm build`         | Production build                                                             |
-| `pnpm lint`          | ESLint                                                                       |
-| `pnpm typecheck`     | `next typegen` then `tsc --noEmit` (typegen creates route prop types)        |
-| `pnpm test`          | Vitest: unit + integration (integration needs Postgres and `.env`)           |
-| `pnpm format:check`  | Prettier check (`pnpm format` to fix)                                        |
-| `pnpm db:generate`   | Generate a migration from the Drizzle schema                                 |
-| `pnpm db:migrate`    | Apply migrations to `DATABASE_URL`                                           |
-| `pnpm auth:generate` | Regenerate Better Auth tables; must be a no-op on a clean tree               |
-| `pnpm test:e2e`      | Playwright: prepares `waybill_e2e`, builds, starts on :3100, runs specs      |
-| `pnpm db:seed`       | Demo seed "Demo Freight Co"; no-op if present, `--reset` recreates `waybill` |
+| Script               | Purpose                                                                             |
+| -------------------- | ----------------------------------------------------------------------------------- |
+| `pnpm dev`           | Next.js dev server                                                                  |
+| `pnpm build`         | Production build                                                                    |
+| `pnpm lint`          | ESLint                                                                              |
+| `pnpm typecheck`     | `next typegen` then `tsc --noEmit` (typegen creates route prop types)               |
+| `pnpm test`          | Vitest: unit + integration (integration needs Postgres and `.env`)                  |
+| `pnpm format:check`  | Prettier check (`pnpm format` to fix)                                               |
+| `pnpm db:generate`   | Generate a migration from the Drizzle schema                                        |
+| `pnpm db:migrate`    | Apply migrations to `DATABASE_URL`                                                  |
+| `pnpm auth:generate` | Regenerate Better Auth tables; must be a no-op on a clean tree                      |
+| `pnpm test:e2e`      | Playwright: prepares `waybill_e2e`, builds, starts on :3100, runs specs             |
+| `pnpm db:seed`       | Demo seed "Demo Freight Co"; no-op if present, `--reset` recreates `waybill`        |
+| `pnpm simulate`      | Truck simulator: drives the demo org's trucks through the services (`waybill` only) |
+| `pnpm routes:fetch`  | One-off OSRM fetch of `src/server/routes/road-routes.json`; not in build or tests   |
 
 Done criteria for every checkpoint: format:check, lint, typecheck, test, build and test:e2e all pass,
 with a clean tree.

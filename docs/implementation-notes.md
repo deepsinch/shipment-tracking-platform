@@ -20,10 +20,10 @@ Phase 1 delivered, checkpoint by checkpoint:
    handling, public tracking page; Playwright e2e against a dedicated database; README.
 6. Demo seed (`pnpm db:seed`), sign-in/sign-up rate limiting, Phase 1 docs.
 
-**Phase 2 (live tracking) is in progress on branch `phase-2-live-tracking`.** Checkpoint 4 is
-reached: format:check, lint, typecheck, test (178 unit + 181 integration), build and test:e2e (13 specs)
-pass. **Next: checkpoint 5 (truck simulator).** The design is in `docs/architecture.md`,
-"Phase 2: live tracking"; follow it. Checkpoints, each green and reviewed:
+**Phase 2 (live tracking) is complete on branch `phase-2-live-tracking`** (checkpoint 5 reached).
+format:check, lint, typecheck, test (212 unit + 188 integration), build and test:e2e (13 specs)
+pass. **Next: Phase 3** (checkpoints below, under "Next: Phase 3"). Phase 2 delivered, checkpoint
+by checkpoint (design and as-built notes in `docs/architecture.md`, "Phase 2: live tracking"):
 
 1. **[done] Driver app and reassignment.** `/driver` (mobile-first, assigned shipments, big-button status
    flow via `statusOptionsFor`), role-based landing after sign-in, `assignDriver` service with a
@@ -47,15 +47,44 @@ pass. **Next: checkpoint 5 (truck simulator).** The design is in `docs/architect
    the map, live moves with a short ease. The detail page has a small route map (pickup, delivery,
    straight `LineString`, live position marker). The seed gives the demo driver's unfinished
    shipments a last position. E2E with tiles blocked.
-5. **Truck simulator.** OSRM route fixtures for the seed's city pairs (committed), a simulator
-   script driving active shipments through the services. Phase 2 e2e: a driver advances a shipment
-   and the dashboard updates without a reload. The detail map's `RouteMap` already takes a
-   `LineString` (`route` prop): pass the fixture's geometry instead of `straightLineRoute`, and
-   make the line solid (it is dashed because a straight line is only an approximation).
+5. **[done] Truck simulator.** OSRM road routes for the seed's 29 city pairs (committed fixture,
+   `pnpm routes:fetch`), drawn solid on the detail map (straight dashed line otherwise), and
+   `pnpm simulate`, which drives the demo trucks through `recordLocationPing` and
+   `changeShipmentStatus` only (pure planner + thin wiring, unit and integration tested). The Phase 2
+   acceptance e2e (a driver advances a shipment, the dispatcher's page updates without a reload) is
+   `tests/e2e/realtime.spec.ts` ("the dispatcher's detail page follows the driver's updates without
+   a reload"), with the list (`… booking made in another tab …`) and the map
+   (`live-map.spec.ts`) covered alongside; not duplicated.
+
+## Next: Phase 3
+
+Each checkpoint green and reviewed, like Phase 2. Suggested order (later ones build on earlier):
+
+1. **Public API with API keys.** `api_keys` table (hashed key, prefix for display, organization,
+   scopes, last used, revoked), admin UI to create and revoke (shown once). Route handlers under
+   `/api/v1` (list, get, create shipments; change status) over the existing services, with an
+   `AuthContext` for the key. Zod at the boundary, explicit response projections with key-set tests,
+   per-key rate limits (decision 11's counters). Concurrency over HTTP: `ETag` = shipment version,
+   `If-Match` required on status changes (`412` on mismatch, `428` without), so API clients get the
+   same lost-update protection as forms. OpenAPI document.
+2. **Signed, retried webhooks.** Endpoints per organization (URL, secret, event types), an outbox
+   table written in the same transaction as the change (like `pg_notify` today), a delivery worker
+   with exponential backoff and a dead-letter state, HMAC-SHA256 signatures with a timestamp
+   (replay window), a delivery log in the UI with "resend". Decide where the worker runs (Vercel Cron
+   or a queue) before building.
+3. **Email notifications via Resend.** Customer emails on chosen status changes (recipient email
+   already stored), from the same outbox; templates with the public tracking link; idempotency key
+   per event; unsubscribe link; test mode without a key in development.
+4. **Proof of delivery.** Photo and signature captured in the driver app on delivery, uploaded to
+   object storage (private, signed URLs), linked to the `delivered` event; replaces the client-side
+   confirm step for deliveries and gives the public page a "signed by" line (no photo publicly).
+5. **AI intake of shipment request emails.** Inbound email (webhook from the mail provider) parsed
+   by an LLM into a draft shipment (structured output validated by the same Zod schema), shown to a
+   dispatcher for review before `createShipment`; never auto-booked. Evaluate on a small fixture set.
 
 ## Roadmap
 
-- **Phase 2 (in progress):** driver app, location pings, live map (MapLibre + OpenStreetMap), realtime
+- **Phase 2 (done):** driver app, location pings, live map (MapLibre + OpenStreetMap), realtime
   via SSE, truck simulator. Checkpoints above.
 - **Phase 3:** public API with API keys, signed and retried webhooks, email notifications via Resend,
   proof of delivery (photo + signature), AI intake of shipment request emails.
@@ -503,7 +532,7 @@ import.meta.url).href)` makes Turbopack emit the worker to `/_next/static/media/
   `live-map.spec.ts` waits for the server's 10 s ping throttle, hence `test.slow()`.
 - **Seed positions.** The demo driver's unfinished shipments get one ping through
   `recordLocationPing` (injected clock): on-the-road ones a few minutes before the seed's `now`,
-  the exception just before it stopped. Positions are interpolated between the cities without
+  the exception just before it stopped. Positions are interpolated along the route (straight line until checkpoint 5, the road route since) without
   drawing from the PRNG, so the rest of the seed is unchanged. 8 markers on a fresh seed.
 - **Proven-red checks (checkpoint 4):** `FleetMap` ignoring position events (live-map spec red:
   the marker stayed at the first fix). Restored.
@@ -512,6 +541,42 @@ import.meta.url).href)` makes Turbopack emit the worker to `/_next/static/media/
   container, markers jumping on hover, the popup closing as soon as a marker was clicked, the
   zoom buttons covering the delivery pin and clipping its label on a phone (the route map now fits
   with extra right padding), and a popup opened from the list is panned clear of the edges.
+
+### Truck simulator and road routes (Phase 2, checkpoint 5)
+
+- **Layout.** Pure: `src/lib/random.ts` (mulberry32, shared by seed and simulator),
+  `src/lib/route-geometry.ts`, `src/server/seed/demo-data.ts` (the seed's draft),
+  `src/server/simulator/truck.ts` (planner). Server: `src/server/routes/` (fixture schema, JSON,
+  lookup), `src/server/simulator/simulator.ts`. Scripts: `scripts/simulate.ts`,
+  `scripts/fetch-routes.ts`. Design and decisions 31-35 in the architecture doc.
+- **Changing the seed's cities or plans** changes its city pairs: run `pnpm routes:fetch` and
+  commit the new fixture (the coverage test in `road-routes.test.ts` fails until then). Changing the
+  order of the PRNG draws in `draftShipment` changes every seeded shipment after it; the seed
+  refactor was verified by diffing a time-independent dump of the seeded database before and after.
+- **Gotcha: Node's `fetch` ignores `HTTPS_PROXY`.** In this environment run
+  `NODE_USE_ENV_PROXY=1 pnpm routes:fetch` (Node 22.21+, prints an "experimental" warning). curl
+  works without it. The OSRM demo server answered every request.
+- **Gotcha: `changeShipmentStatus` checks `occurredAt` against the real clock** (no injectable
+  `now`), so a test clock must stay at most 5 minutes ahead of real time, and after the shipment's
+  last status event. The simulator test's clock starts an hour in the past and steps 12 s.
+- **Throttle in the simulator.** The tick is 12 s and `recordLocationPing` gets the simulator's
+  clock as server time; a throttled ping is logged and the truck keeps its new distance, so the
+  next accepted ping reports where it really is (integration test with 4 s steps).
+- **Exception ownership** is read from history each tick (latest status event's actor equals the
+  truck's driver), not remembered, so `--once` and restarts resume the simulator's own exceptions.
+  Consequence: the seed's driver-recorded exceptions are cleared within a minute of starting the
+  simulator; office-recorded ones stay.
+- **Stopping it.** The script exits 0 after the current tick on SIGINT. When killing it from a
+  script, signal the process group or the node process; a `pkill -f` pattern that also matches
+  the `sh -c` pnpm spawns makes pnpm print `ELIFECYCLE` even though the simulator stopped cleanly.
+  `pgrep -f <pattern>` also matches the shell running it.
+- **Proven-red checks (checkpoint 5):** sending the delivery before the arrival ping (2 unit and
+  the end-to-end integration test red: the service refuses the late ping as `inactive`). Restored.
+- **Visual check** (Playwright, 1280 px and 390 px, real tiles, fresh seed, production build,
+  simulator running): live map twice about a minute apart (every truck moved, e.g. 53.07,9.12 →
+  53.26,9.44 towards Hamburg; two deliveries left the map), the detail map with the Rotterdam →
+  Hamburg road route, and the public page of a simulator-delivered shipment (text only, notes
+  read well). Nothing needed fixing beyond the known marker overlap.
 
 ### Testing
 
@@ -579,6 +644,17 @@ import.meta.url).href)` makes Turbopack emit the worker to `/_next/static/media/
 - **Map markers can overlap** when shipments are close (two trucks in one city). Fine for a
   small carrier; clustering (MapLibre's GeoJSON `cluster`) is the fix at fleet scale.
 - **The map has no dark basemap.** Positron is light; popups are styled light in both themes.
+- **The simulator only drives shipments with stop coordinates.** UI bookings have none (the form
+  does not geocode), so a new booking joins the demo only if it is assigned to a driver and has
+  coordinates; seeded pairs follow roads, others a straight line. Geocoding at booking would fix it.
+- **The demo runs out.** After about 12 minutes at the defaults every assigned truck is delivered
+  and the simulator suggests `pnpm db:seed --reset`. A hosted demo needs the scheduled reset
+  (Phase 4) or a simulator that books new work.
+- **Simulator exceptions are coarse.** A 1 % chance per tick in transit, one per truck per run,
+  always cleared after 5 ticks; no failed delivery attempts or returns.
+- **Route fixture licence.** OSRM demo data is OpenStreetMap (ODbL); the attribution is in the
+  fixture, and the map already credits OpenStreetMap. Re-fetching depends on the donated demo
+  server's goodwill: keep it a rare, one-off run.
 
 ## Environment notes
 

@@ -200,10 +200,10 @@ private by default, and a test asserts the exact key set so an accidental additi
 notes, driver identity, or internal ids. Pages are `noindex` because tracking data is private to the
 people who hold the code. Unknown and malformed codes get the same not-found page.
 
-## Phase 2: live tracking (design)
+## Phase 2: live tracking
 
-Phase 2 adds the driver's side and live updates. This section is the architect's design; the
-implementation refines it checkpoint by checkpoint.
+Phase 2 adds the driver's side and live updates. Each part starts with the architect's design,
+followed by what was built where it refines or differs from it.
 
 ### Driver app
 
@@ -433,9 +433,9 @@ As implemented (checkpoint 4):
   status, destination, last seen and coordinates, in a stable order (problems first, then by
   tracking code), so it never reshuffles under a keyboard user. The detail page keeps its
   "Last seen" line.
-- **Detail map.** Pickup and delivery pins, the route as a dashed straight line (`RouteMap` takes
-  any GeoJSON `LineString`; the simulator's road geometry will replace it), and the live position
-  marker. Cooperative gestures, since it sits in a scrolling page.
+- **Detail map.** Pickup and delivery pins, the route, and the live position marker. Cooperative
+  gestures, since it sits in a scrolling page. Since checkpoint 5 the route is the real road route
+  (solid) when the fixture has the pair, else a dashed straight line (see "Truck simulator").
 - **Lifecycle.** The map is created in an effect and removed in its cleanup, which also runs when
   Next hides the route (Activity), so hidden pages hold no WebGL context.
 
@@ -447,6 +447,57 @@ As implemented (checkpoint 4):
   pairs from a public OSRM server and commits it as JSON, so the simulator follows real roads with no
   runtime dependency. If fetching is not possible, the fallback is great-circle interpolation, which
   is documented as such.
+
+As implemented (checkpoint 5):
+
+- **Seed drafted as data.** `draftDemoShipments(now)` (`src/server/seed/demo-data.ts`) makes every
+  random choice of the seed up front, in the original draw order (a seeded database is unchanged);
+  `seedDemo` applies the draft through the services. So the fixture script and a unit test can list
+  the seed's 29 pickup → delivery pairs without a database.
+- **Route fixture.** `pnpm routes:fetch` requests each pair from `router.project-osrm.org`
+  (`overview=full`, GeoJSON), one at a time, 1.5 s apart, with a User-Agent naming the project. It
+  simplifies each line with Douglas-Peucker at 120 m, rounds to 5 decimals (about 1 m), and pins
+  both ends to the exact stop coordinates (OSRM snaps to the nearest road). Result:
+  `src/server/routes/road-routes.json`, 60 KB, with OSRM's distance and duration and an ODbL
+  attribution. It is excluded from Prettier (one line per route keeps it small and diffable) and is
+  never fetched at runtime. A unit test fails if a seed pair has no route. OSRM was reachable, so
+  the great-circle fallback was not needed for the fixture.
+- **Lookup.** `routeBetween(origin, destination)` (`src/server/routes/road-routes.ts`,
+  `server-only`) matches the stops by coordinates (within 1e-4°) and returns
+  `{ kind: "road" | "straight", line }`. The detail page passes only that one LineString to the
+  client; the public page has no route. UI-booked shipments between other places get the straight
+  line. The seed's last positions now sit the same fraction along the road route.
+- **Geometry** (`src/lib/route-geometry.ts`, pure): haversine distances, cumulative distances
+  along a route, the point at a distance (binary search), and the distance along the route of a
+  nearby point (projection onto the closest segment).
+- **Core** (`src/server/simulator/truck.ts`, pure): `planTick(state, config, random)` returns the
+  actions for one truck and its next state. Defaults: a tick every 12 s (the server accepts one
+  ping per 10 s, so a 10 s cadence would be throttled by jitter), 30x time compression, 80 km/h on
+  the road and 35 km/h out for delivery: about 8 km per tick, visible at the fleet map's zoom.
+  Statuses: `created → picked_up` at the pickup, `→ in_transit` as it sets off, `→
+out_for_delivery` within 15 km of the address, `→ delivered` on arrival ("Delivered to
+  reception"). In transit there is a 1 % chance per tick of an exception with a public note, at most
+  once per truck per run, cleared after 5 ticks. A ping always precedes a status that takes the
+  shipment off the road, so the arrival ping lands on the address.
+- **Wiring** (`src/server/simulator/simulator.ts`): `createSimulator({ drivers, random, config,
+maxShipments, clock, log })`. Each tick re-reads every driver's assigned unfinished shipments
+  with the driver's own `AuthContext` (`listAssignedShipments`, `getShipment`,
+  `getShipmentPositions`), plans each truck and calls `recordLocationPing` /
+  `changeShipmentStatus`, nothing else. Only the distance along each route and an exception
+  countdown live in memory; status and version come fresh each tick, so a dispatcher can intervene.
+  A refused action (conflict, invalid transition) ends that truck's tick and it is re-planned from
+  the fresh state; a throttled ping is a normal outcome (the truck still moved). A truck seen for
+  the first time starts from its last position projected onto its route, so restarts continue.
+- **Whose exception.** An exception whose latest status event was recorded by the truck's driver
+  (the simulator's own, from this or an earlier run, or the seed's) is the driver's to clear; one
+  recorded by the office is a hold, left until the office moves it on. Deciding from history
+  rather than memory means `--once` runs and restarts never strand a shipment.
+- **Script** (`pnpm simulate`, `scripts/simulate.ts`): resolves Demo Freight Co's drivers as
+  session-equivalent `AuthContext`s (`resolveAuthContext`, `listDrivers` as the admin), refuses
+  any database but `waybill`, `--once`, `--speed`, `--seed`, `--shipments`, `--tick` (at least
+  11 s), one log line per action, stops after the current tick on Ctrl+C, and suggests a reseed
+  when nothing is left to drive. Assigned shipments still at the sender are picked up, so a
+  dispatcher can assign the demo driver to a new booking during a demo and watch it join.
 
 ## Decisions log
 
@@ -482,3 +533,8 @@ As implemented (checkpoint 4):
 | 28  | Map snapshot re-rendered by `LiveRefresh`, merged with live fixes on the client     | No new endpoint or auth surface; resync, coalescing and Activity handling reused; newest fix wins in any order             | A route handler or Server Action returning the snapshot (second data path to secure and test); re-fetch per position (wasteful)   |
 | 29  | DOM markers, not a GeoJSON symbol layer                                             | Focusable buttons with accessible labels, Tailwind styling, simple click handling; fine for a small carrier's fleet        | Symbol/circle layer (faster for thousands of points, but no keyboard focus or labels; would add clustering at scale)              |
 | 30  | OpenFreeMap "positron" basemap                                                      | Pale, data-first style: status colours stay the only colour on the map                                                     | "liberty" (colourful; greens and blues compete with the status colours), "bright"                                                 |
+| 31  | Seed drafted as pure data, then applied through the services                        | Fixture script and coverage test read the seed's city pairs without a database; draw order kept, so data is unchanged      | Hard-coded pair list (drifts from the seed); fetching every city pair (156 requests, larger file)                                 |
+| 32  | Routes matched by stop coordinates, server-only lookup, straight-line fallback      | Independent of city spelling; fixture never shipped to browsers; any shipment still gets a line                            | Match by city name; shipping the fixture to the client; live routing calls                                                        |
+| 33  | Simulator as pure planner plus service wiring, state re-read every tick             | Every rule enforced by the real services; plans unit tested; dispatchers can intervene mid-run                             | Raw SQL writes (bypass rules and realtime); a long-lived in-memory model of each shipment (goes stale)                            |
+| 34  | Exception ownership read from history (who recorded it)                             | Restarts and `--once` runs never strand a shipment; office holds are respected                                             | In-memory list of the simulator's own exceptions (lost on restart); clearing every exception (overrides the office)               |
+| 35  | 12 s simulator tick with time compression                                           | Clear of the 10 s ping throttle with margin for jitter; compression keeps movement visible                                 | 10 s tick (frequently throttled); faster ticks with dropped pings; real-time speed (trucks barely move)                           |
