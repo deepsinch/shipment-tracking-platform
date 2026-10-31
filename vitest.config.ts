@@ -33,8 +33,12 @@ export default defineConfig({
           environment: "node",
           globalSetup: ["tests/integration/global-setup.ts"],
           setupFiles: ["tests/integration/setup.ts"],
-          // Code under test uses DATABASE_URL; point it at the test database.
-          env: { DATABASE_URL: process.env.TEST_DATABASE_URL ?? "" },
+          // Code under test uses DATABASE_URL (and the realtime listener DATABASE_DIRECT_URL);
+          // point both at the test database.
+          env: {
+            DATABASE_URL: process.env.TEST_DATABASE_URL ?? "",
+            DATABASE_DIRECT_URL: process.env.TEST_DATABASE_URL ?? "",
+          },
           // One shared database: run files one at a time.
           fileParallelism: false,
           testTimeout: 15_000,

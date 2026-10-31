@@ -54,6 +54,8 @@ export default defineConfig({
     reuseExistingServer: false,
     timeout: 300_000,
     stdout: "pipe",
-    env: { DATABASE_URL: databaseUrl, BETTER_AUTH_URL: baseURL },
+    // The realtime listener must watch the same database (a DATABASE_DIRECT_URL in .env would
+    // otherwise point it at the dev database and no live update would ever arrive).
+    env: { DATABASE_URL: databaseUrl, DATABASE_DIRECT_URL: databaseUrl, BETTER_AUTH_URL: baseURL },
   },
 });

@@ -1,6 +1,5 @@
 import "server-only";
 
-import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 
 import { SERVICE_LEVELS } from "@/domain/service-level";
@@ -8,8 +7,10 @@ import { canCreateShipments } from "@/domain/shipment-permissions";
 import { generateTrackingCode } from "@/domain/tracking-code";
 import type { AuthContext } from "@/server/auth/auth-context";
 import { getDb, type Transaction } from "@/server/db/client";
-import { member, shipmentEvents, shipments, type Shipment } from "@/server/db/schema";
+import { shipmentEvents, shipments, type Shipment } from "@/server/db/schema";
 
+import { isDriverInOrganization, NOT_AN_ORGANIZATION_DRIVER } from "./driver-membership";
+import { announceShipmentChange } from "./realtime-signals";
 import { forbidden, validationFailure, type Forbidden, type ValidationFailure } from "./results";
 import { blankToUndefined, optionalCoordinate, optionalText } from "./validation";
 
@@ -77,7 +78,7 @@ const MAX_TRACKING_CODE_ATTEMPTS = 5;
 
 /**
  * Books a new shipment: inserts it with a fresh tracking code plus its `created` history event, in
- * one transaction. Admins and dispatchers only.
+ * one transaction that also announces it on the realtime bus. Admins and dispatchers only.
  */
 export async function createShipment(
   ctx: AuthContext,
@@ -94,12 +95,11 @@ export async function createShipment(
   const { assignedDriverId, ...fields } = parsed.data;
 
   const db = getDb();
-  // Assigning someone outside the organization (or a non-driver) would leak the shipment to them.
   if (assignedDriverId && !(await isDriverInOrganization(assignedDriverId, ctx.organizationId))) {
     return {
       ok: false,
       reason: "validation",
-      fieldErrors: { assignedDriverId: ["Choose a driver from your organization"] },
+      fieldErrors: { assignedDriverId: [NOT_AN_ORGANIZATION_DRIVER] },
     };
   }
 
@@ -120,6 +120,7 @@ export async function createShipment(
       occurredAt: created.createdAt,
       actorUserId: ctx.userId,
     });
+    await announceShipmentChange(tx, created, "created");
     return created;
   });
 
@@ -149,13 +150,4 @@ async function insertWithUniqueTrackingCode(
   throw new Error(
     `Could not generate a unique tracking code in ${MAX_TRACKING_CODE_ATTEMPTS} attempts`,
   );
-}
-
-async function isDriverInOrganization(userId: string, organizationId: string): Promise<boolean> {
-  const [membership] = await getDb()
-    .select({ role: member.role })
-    .from(member)
-    .where(and(eq(member.userId, userId), eq(member.organizationId, organizationId)))
-    .limit(1);
-  return membership?.role === "driver";
 }

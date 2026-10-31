@@ -226,3 +226,135 @@ increments the count.
 **Known tradeoff.** Keying the account limit on email + IP means a botnet rotating IPs still gets a
 few guesses per IP. A per-email limit stops that but lets anyone lock a victim out of their account;
 the planned answer is a looser per-email cap plus breached-password checks.
+
+## Sending each role to its own home right after sign-in
+
+**Problem.** Drivers belong on `/driver` and staff on `/dashboard`, decided at the moment of
+sign-in. But sign-in runs in a Server Action, and the auth library sets the new session cookie on the
+response, so the usual "who is signed in?" helper (which reads the request) cannot see the session
+in that same request.
+
+**Options considered.**
+
+- Redirect everyone to `/dashboard` and let its guard bounce drivers: works, but an extra hop and a
+  flash of the wrong page.
+- A `/home` route that only redirects: the same extra hop, plus a route that exists for plumbing.
+- Replay the response's `Set-Cookie` into a second session lookup: fragile next to the library's own
+  cookie handling.
+- Re-derive the role from the user's oldest membership: duplicates the session hook's rule, which
+  could drift.
+- **Chosen:** read the session row the hook just wrote, by its token, and run the same
+  `resolveAuthContext` every request uses. Exact (the same organization and role the session will
+  have), one indexed query, covered by an integration test.
+
+**Related.** Wrong-surface visits (a driver opening `/dashboard`) redirect server-side inside the
+page's Suspense boundary. A role-aware `proxy.ts` would be faster, but it needs the role in the
+cookie, which conflicts with reading roles fresh on every request (decision 8).
+
+## Throttling location pings without a race
+
+**Problem.** Drivers' phones send positions, and the server should accept at most one per shipment
+every 10 seconds, even when two arrive at the same moment (two tabs, a retry, a flaky network).
+
+**Approach** ([`record-location-ping.ts`](../src/server/services/record-location-ping.ts)): one
+conditional upsert on `shipment_positions` is both the check and the write:
+`INSERT ... ON CONFLICT (shipment_id) DO UPDATE ... WHERE updated_at <= now - 10s RETURNING`.
+Postgres serializes concurrent upserts of the same row and re-checks the `WHERE` against the
+committed row, so exactly one ping wins; the ping history row is inserted only if a row came back.
+Out-of-order pings are stored but do not move the position (a per-column `CASE` keeps the newer
+fix), and a `FOR SHARE` lock on the shipment makes a concurrent status change wait, so a ping is
+never accepted for a shipment delivered mid-flight.
+
+**Options considered.**
+
+- Read the last ping, then write: races. A burst of 5 parallel pings passed against it anyway,
+  because the transactions are so short; only a forced race (hold the row lock until both requests
+  are blocked) exposed the bug. Bursts are not proof.
+- A per-shipment advisory lock: an extra round trip and easy to forget at a new call site.
+- Redis rate limiter: another service to run.
+- A max-over-pings query: slow on a growing table, and still racy.
+
+**Telemetry is not history.** Pings live in their own tables (decision 13). They reject `UPDATE`
+like history does, but allow `DELETE` so the 30-day retention purge can run.
+
+## Live updates without a replay log, and the race hiding in "re-fetch on reconnect"
+
+**Problem.** Dashboards, the shipment page and the driver app update without reloads. The design
+(decisions 15–16) treats realtime messages as invalidations: services `pg_notify` inside their
+transaction, one `LISTEN` connection per server instance fans out to SSE streams, and clients
+re-fetch rather than replaying an event log. The hidden race: the browser's EventSource `open`
+event only means the HTTP response started. The server's `LISTEN` may not be active yet, so a change
+committed in that gap is never announced, and a client that re-fetched on `open` would never learn
+about it.
+
+**Options considered.**
+
+- Re-fetch on `open`: racy, as above.
+- Make the route wait for `LISTEN` before responding: needs a timeout and an error path, and
+  EventSource treats a non-200 response as fatal (no automatic reconnect).
+- Replay a log with `Last-Event-ID`: contradicts the invalidation design and adds state.
+- **Chosen:** the bus itself sends `resync` to each subscriber once its subscription is live, and
+  again after every listener reconnect. Clients re-fetch (and show "Live") only on that event. It
+  closes the race with no new state.
+
+**Isolation.** Each message is checked against the viewer (organization, and for drivers their
+current or previous assignment) and projected to a client shape with no organization or user ids.
+Tests prove a stream never receives another organization's event using a sentinel: Postgres
+delivers notifications in commit order, so once a later event has arrived, an earlier one would have
+too. Proving absence without sleeping is otherwise impossible.
+
+**Hosting.** `LISTEN` needs a direct connection (transaction poolers do not support it). Streams
+close themselves at 270 s, under the 300 s function limit, and reconnect. A refresh is deferred
+while a form has unsaved input, with a "Show latest" prompt instead of wiping what someone typed.
+
+## A live map that mixes server renders and client events
+
+**Problem.** Marker positions arrive as live events in the browser, but which shipments exist and
+their status change on the server. Two sources of truth meet in one component.
+
+**Options considered.**
+
+- A snapshot endpoint the map re-fetches on resync: a second data path to authorize and test, and it
+  duplicates the coalescing and hidden-page logic the live refresh already has.
+- Copy the server snapshot into client state once: later server refreshes silently stop reaching it.
+- Re-fetch on every position event: wasteful at one event per vehicle every 10 seconds.
+- **Chosen:** derive the markers on every render as `mergeFleet(snapshotProp, liveFixes)`. The
+  snapshot decides which shipments exist; live fixes only move them, and the newest device time wins
+  in either order. The page refreshes only for structural changes (a status change, or the first ping
+  of a shipment the snapshot does not have yet). The merge is a pure, unit-tested function, and an
+  end-to-end test proves markers move, appear and disappear without a reload.
+
+**Accessibility.** The map is supplementary: a list beside it carries the same information, and
+keyboard users reach every marker's link from there. Marker easing respects `prefers-reduced-motion`.
+
+**Gotcha worth telling.** CSS applies the individual `scale` property before `transform`, so a hover
+scale on a MapLibre marker scaled its positioning translation and the marker jumped about 40 px
+away from the pointer, making it unclickable. The effect now lives on an inner element.
+
+**Cost.** MapLibre is about 290 KB gzipped and loads only on the two pages with a map, after
+hydration; no other page downloads it, and it never runs on the server.
+
+## A demo simulator that obeys every rule
+
+**Problem.** A portfolio demo should look alive when someone opens it: trucks moving along real
+roads, statuses advancing, the occasional problem. A simulator that wrote to the database directly
+would be quick to build, but it could produce states the real app would reject.
+
+**Approach** ([`src/server/simulator/`](../src/server/simulator/)): `pnpm simulate` acts as each
+truck's assigned driver and goes through the real services only (`recordLocationPing`,
+`changeShipmentStatus`), so every rule, throttle, history entry and realtime message applies. Routes
+are OpenStreetMap road geometry fetched once from OSRM and committed as a 60 KB fixture, so there is
+no runtime dependency on a public routing server. The planner (route interpolation, next action) is
+pure and tested over whole routes against the state machine; the script is thin wiring that re-reads
+status and version every tick and re-plans when a service refuses an action.
+
+**Interesting bug.** The simulator first remembered "this exception is mine to clear" in memory. A
+restart, or a `--once` run, then treated its own exception as an office hold and left the shipment
+stuck forever.
+
+- Marking simulator exceptions with special note text: fragile, and it leaks into customer text.
+- A new table for simulator state: extra schema for a demo tool.
+- Clearing every exception: overrides real office holds.
+- **Chosen:** read ownership from the append-only history each tick. If the truck's driver
+  recorded the exception, the driver clears it; otherwise it waits for the office. It mirrors real
+  ownership, survives restarts and needs no new state.

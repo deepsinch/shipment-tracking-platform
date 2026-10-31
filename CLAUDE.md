@@ -41,6 +41,15 @@ src/
   for drivers). Never hand-write the scope in a query.
 - Anything public (tracking page, later the public API) selects an explicit column list, never a whole
   row, and has a test asserting the exact set of returned keys.
+- Realtime: every write that changes what someone sees publishes on the `RealtimeBus` inside its own
+  transaction (delivered only on commit). Messages are invalidations; clients re-fetch on the
+  server's `resync`. What reaches a browser is an explicit projection (`toClientEvent`), filtered
+  by `isVisibleTo` (organization, driver scope); never organization or user ids.
+- Forms whose input a live refresh could wipe carry `data-unsaved-guard`.
+- Maps (MapLibre) are client-only and supplementary: every map has a text equivalent that keyboard
+  and screen-reader users can use, and the public page never shows a map or coordinates.
+- E2E specs import `test` from `tests/e2e/fixtures.ts` (map tiles blocked, no network dependency);
+  contexts a spec creates itself call `blockMapTiles`.
 - Anything with history (users, organizations, shipments) is deactivated, never hard-deleted: foreign keys
   to history are `restrict`.
 - Database constraints (CHECKs, composite FKs) complement Zod validation; they never replace it.
@@ -67,11 +76,17 @@ src/
 - Never skip, weaken or delete a test to make it pass. Fix the code, or report the problem.
 - For critical guarantees (triggers, constraints, authorization), prove the test can fail (temporarily
   break the code, see it go red, restore).
+- Concurrency guarantees (conditional updates, throttles, limits) are proven with a forced race:
+  hold the row lock from a third transaction until both contenders are blocked, then release.
+  Parallel bursts alone can pass against racy code.
 - Every commit leaves the repo working: migrations apply and checks pass at each commit, not only at the tip.
 - Integration tests run against a real Postgres. The test setup refuses any database whose name does
   not end in `_test`; tests use random ids instead of cleaning up (history cannot be deleted).
+- Every UI checkpoint includes a visual check with Playwright screenshots at 390px and 1280px (driver
+  and public pages are designed for 390px first); fix what looks off and say so in the report.
 - Update `docs/implementation-notes.md` as you go: tick finished items, record gotchas a newcomer
   would trip over.
+- Stop every dev or production server you started before reporting; leave no background processes.
 - If blocked by the environment (network, missing tool), stop and report the exact error. No mirrors,
   alternative registries or other workarounds without the architect's approval.
 
@@ -130,22 +145,26 @@ src/
   `pnpm view next version` should print a version. If installs fail with `ENOTFOUND`, remove
   `registry.npmjs.org` from `NO_PROXY`, `no_proxy` and `npm_config_noproxy` for that command only
   (details in `docs/implementation-notes.md`).
+- Node's built-in `fetch` ignores `HTTPS_PROXY` unless run with `NODE_USE_ENV_PROXY=1` (needed for
+  `pnpm routes:fetch` here).
 
 ## Commands
 
-| Script               | Purpose                                                                      |
-| -------------------- | ---------------------------------------------------------------------------- |
-| `pnpm dev`           | Next.js dev server                                                           |
-| `pnpm build`         | Production build                                                             |
-| `pnpm lint`          | ESLint                                                                       |
-| `pnpm typecheck`     | `next typegen` then `tsc --noEmit` (typegen creates route prop types)        |
-| `pnpm test`          | Vitest: unit + integration (integration needs Postgres and `.env`)           |
-| `pnpm format:check`  | Prettier check (`pnpm format` to fix)                                        |
-| `pnpm db:generate`   | Generate a migration from the Drizzle schema                                 |
-| `pnpm db:migrate`    | Apply migrations to `DATABASE_URL`                                           |
-| `pnpm auth:generate` | Regenerate Better Auth tables; must be a no-op on a clean tree               |
-| `pnpm test:e2e`      | Playwright: prepares `waybill_e2e`, builds, starts on :3100, runs specs      |
-| `pnpm db:seed`       | Demo seed "Demo Freight Co"; no-op if present, `--reset` recreates `waybill` |
+| Script               | Purpose                                                                             |
+| -------------------- | ----------------------------------------------------------------------------------- |
+| `pnpm dev`           | Next.js dev server                                                                  |
+| `pnpm build`         | Production build                                                                    |
+| `pnpm lint`          | ESLint                                                                              |
+| `pnpm typecheck`     | `next typegen` then `tsc --noEmit` (typegen creates route prop types)               |
+| `pnpm test`          | Vitest: unit + integration (integration needs Postgres and `.env`)                  |
+| `pnpm format:check`  | Prettier check (`pnpm format` to fix)                                               |
+| `pnpm db:generate`   | Generate a migration from the Drizzle schema                                        |
+| `pnpm db:migrate`    | Apply migrations to `DATABASE_URL`                                                  |
+| `pnpm auth:generate` | Regenerate Better Auth tables; must be a no-op on a clean tree                      |
+| `pnpm test:e2e`      | Playwright: prepares `waybill_e2e`, builds, starts on :3100, runs specs             |
+| `pnpm db:seed`       | Demo seed "Demo Freight Co"; no-op if present, `--reset` recreates `waybill`        |
+| `pnpm simulate`      | Truck simulator: drives the demo org's trucks through the services (`waybill` only) |
+| `pnpm routes:fetch`  | One-off OSRM fetch of `src/server/routes/road-routes.json`; not in build or tests   |
 
 Done criteria for every checkpoint: format:check, lint, typecheck, test, build and test:e2e all pass,
 with a clean tree.

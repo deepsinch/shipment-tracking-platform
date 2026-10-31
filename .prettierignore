@@ -3,3 +3,4 @@ src/server/db/migrations/
 .next/
 next-env.d.ts
 AGENTS.md
+src/server/routes/road-routes.json

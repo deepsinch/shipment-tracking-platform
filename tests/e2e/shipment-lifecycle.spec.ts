@@ -1,6 +1,6 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 
-import { changeStatus, createShipment, signUp } from "./helpers";
+import { changeStatus, createShipment, signUp, withoutLiveUpdates } from "./helpers";
 
 test("a dispatcher books and advances a shipment; the customer sees only public details", async ({
   page,
@@ -56,7 +56,9 @@ test("a stale status form reports the conflict, shows fresh data and can be retr
   await createShipment(page);
 
   // A second tab opened on the same shipment, which goes stale once the first tab changes it.
+  // Without live updates: otherwise it might refresh before the user submits.
   const staleTab = await context.newPage();
+  await withoutLiveUpdates(staleTab);
   await staleTab.goto(page.url());
   await expect(staleTab.getByLabel("New status")).toBeVisible();
 
@@ -82,6 +84,35 @@ test("a stale status form reports the conflict, shows fresh data and can be retr
 
   await staleTab.getByRole("button", { name: "Update status" }).click();
   await expect(staleTab.getByTestId("form-status")).toHaveText("Status changed to Exception.");
+});
+
+test("cancelling a shipment asks for confirmation first", async ({ page }) => {
+  await signUp(page, "Kit Dispatcher");
+  const trackingCode = await createShipment(page);
+
+  await changeStatus(page, "Cancelled", { internalNote: "Customer called to cancel" });
+  const dialog = page.getByRole("alertdialog", { name: `Cancel ${trackingCode}?` });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Keep shipment" })).toBeFocused();
+
+  // Keeping it changes nothing, and what was typed is still there.
+  await dialog.getByRole("button", { name: "Keep shipment" }).click();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByTestId("form-status")).toHaveCount(0);
+  await expect(
+    page.getByRole("list", { name: "Shipment history" }).getByRole("listitem"),
+  ).toHaveCount(1);
+  await expect(page.getByLabel("Internal note (optional)")).toHaveValue(
+    "Customer called to cancel",
+  );
+
+  // Confirming submits the form as it is, notes included.
+  await page.getByRole("button", { name: "Update status" }).click();
+  await dialog.getByRole("button", { name: "Cancel shipment" }).click();
+  await expect(page.getByTestId("form-status")).toHaveText("Status changed to Cancelled.");
+  await expect(page.getByRole("list", { name: "Shipment history" })).toContainText(
+    "Customer called to cancel",
+  );
 });
 
 test("an unknown tracking code shows a friendly not-found page", async ({ page }) => {

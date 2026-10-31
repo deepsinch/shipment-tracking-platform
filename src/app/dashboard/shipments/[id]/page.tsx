@@ -1,32 +1,35 @@
-import {
-  ArrowLeftIcon,
-  ArrowRightIcon,
-  ExternalLinkIcon,
-  LockIcon,
-  MapPinIcon,
-} from "lucide-react";
+import { ArrowLeftIcon, ArrowRightIcon, ExternalLinkIcon } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { cache } from "react";
 
+import { LiveRefresh } from "@/components/realtime/live-refresh";
 import { StatusBadge } from "@/components/status-badge";
-import { Timeline, TimelineItem } from "@/components/timeline";
+import { ShipmentHistory } from "@/components/shipment-history";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SERVICE_LEVEL_LABELS } from "@/domain/service-level";
-import { shipmentEventTitle } from "@/domain/shipment-event";
-import { statusOptionsFor } from "@/domain/shipment-permissions";
+import { canAssignDrivers, canChangeDriver, statusOptionsFor } from "@/domain/shipment-permissions";
+import { isTerminalStatus } from "@/domain/shipment-status";
+import { RouteMap } from "@/components/map/route-map";
+import type { Stop } from "@/components/map/route-map-canvas";
+import type { LivePosition } from "@/components/realtime/use-live-position";
 import { formatDateTime, formatPlace, formatWeight } from "@/lib/format";
-import { requireAuthContext } from "@/server/auth/session";
+import { requireAuthContextOn, type AuthContext } from "@/server/auth/session";
 import type { Shipment } from "@/server/db/schema";
-import { getShipment, type ShipmentEventWithActor } from "@/server/services/get-shipment";
+import { routeBetween } from "@/server/routes/road-routes";
+import { getShipment } from "@/server/services/get-shipment";
+import { getShipmentPositions } from "@/server/services/get-shipment-positions";
+import { listDrivers } from "@/server/services/list-drivers";
 
+import { AssignDriverForm } from "./assign-driver-form";
+import { LastSeen } from "./last-seen";
 import { StatusChangeForm } from "./status-change-form";
 
 /** One lookup per request, shared by the metadata and the page. Not found ends both. */
 const loadShipment = cache(async (id: string) => {
-  const ctx = await requireAuthContext();
+  const ctx = await requireAuthContextOn("/dashboard");
   const result = await getShipment(ctx, id);
   if (!result.ok) notFound();
   return { ctx, ...result };
@@ -42,9 +45,14 @@ export async function generateMetadata({
 export default async function ShipmentPage({ params }: PageProps<"/dashboard/shipments/[id]">) {
   const { ctx, shipment, assignedDriverName, events } = await loadShipment((await params).id);
   const options = statusOptionsFor(ctx.role, shipment.status);
+  // Only staff reach this page, but the role rule decides, not the route.
+  const driverList = canAssignDrivers(ctx.role) ? await listDrivers(ctx) : null;
+  const drivers = driverList?.ok ? driverList.drivers : null;
+  const lastPosition = await loadLastPosition(ctx, shipment);
 
   return (
     <main className="flex flex-col gap-6">
+      <LiveRefresh shipmentId={shipment.id} />
       <div className="flex flex-col gap-2">
         <Link
           href="/dashboard/shipments"
@@ -73,42 +81,89 @@ export default async function ShipmentPage({ params }: PageProps<"/dashboard/shi
         )}
       </div>
 
-      {/* DOM order (details, status, history) is also the mobile order. */}
-      <div className="grid items-start gap-6 lg:grid-cols-3">
+      {/* DOM order (details, status, driver, history) is also the mobile order. */}
+      {/* Row 1 sizes to the details; the taller side column grows into row 2, not row 1. */}
+      <div className="grid items-start gap-6 lg:grid-cols-3 lg:grid-rows-[auto_1fr]">
         <ShipmentDetails
           shipment={shipment}
           assignedDriverName={assignedDriverName}
+          lastPosition={lastPosition}
           className="lg:col-span-2"
         />
-        <Card className="lg:col-start-3 lg:row-span-2 lg:row-start-1">
-          <CardHeader>
-            <CardTitle>
-              <h2>Update status</h2>
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {/* Server-rendered props; the form re-reads them after every revalidation. */}
-            <StatusChangeForm
-              shipmentId={shipment.id}
-              version={shipment.version}
-              status={shipment.status}
-              options={options}
-            />
-          </CardContent>
-        </Card>
+        <div className="flex flex-col gap-6 lg:col-start-3 lg:row-span-2 lg:row-start-1">
+          <Card>
+            <CardHeader>
+              <CardTitle>
+                <h2>Update status</h2>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {/* Server-rendered props; the form re-reads them after every revalidation. */}
+              <StatusChangeForm
+                shipmentId={shipment.id}
+                trackingCode={shipment.trackingCode}
+                version={shipment.version}
+                status={shipment.status}
+                options={options}
+              />
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle>
+                <h2>Driver</h2>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {drivers && canChangeDriver(shipment.status) ? (
+                <AssignDriverForm
+                  shipmentId={shipment.id}
+                  version={shipment.version}
+                  assignedDriverId={shipment.assignedDriverId}
+                  drivers={drivers}
+                />
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  {assignedDriverName ?? "No driver"}
+                  {canChangeDriver(shipment.status)
+                    ? "."
+                    : ". The driver of a finished shipment can no longer change."}
+                </p>
+              )}
+            </CardContent>
+          </Card>
+        </div>
         <ShipmentHistory events={events} className="lg:col-span-2" />
       </div>
     </main>
   );
 }
 
+/**
+ * The latest position for the "Last seen" line, or undefined when the line is not shown: a
+ * finished shipment's last position no longer matters (the snapshot leaves it out too).
+ */
+async function loadLastPosition(
+  ctx: AuthContext,
+  shipment: Shipment,
+): Promise<LivePosition | null | undefined> {
+  if (isTerminalStatus(shipment.status)) return undefined;
+  const result = await getShipmentPositions(ctx, { shipmentIds: [shipment.id] });
+  const position = result.ok ? result.positions[0] : undefined;
+  return position
+    ? { lat: position.lat, lng: position.lng, recordedAt: position.recordedAt.toISOString() }
+    : null;
+}
+
 function ShipmentDetails({
   shipment,
   assignedDriverName,
+  lastPosition,
   className,
 }: {
   shipment: Shipment;
   assignedDriverName: string | null;
+  lastPosition: LivePosition | null | undefined;
   className?: string;
 }) {
   return (
@@ -139,6 +194,7 @@ function ShipmentDetails({
             country={shipment.destinationCountry}
           />
         </div>
+        <ShipmentRouteMap shipment={shipment} lastPosition={lastPosition} />
         <dl className="grid gap-x-6 gap-y-4 sm:grid-cols-2">
           <Detail label="Recipient">
             {shipment.recipientName}
@@ -147,6 +203,11 @@ function ShipmentDetails({
             )}
           </Detail>
           <Detail label="Driver">{assignedDriverName ?? "Not assigned"}</Detail>
+          {lastPosition !== undefined && (
+            <Detail label="Last seen">
+              <LastSeen shipmentId={shipment.id} initial={lastPosition} />
+            </Detail>
+          )}
           <Detail label="Weight">{formatWeight(shipment.weightKg)}</Detail>
           <Detail label="Service level">{SERVICE_LEVEL_LABELS[shipment.serviceLevel]}</Detail>
           <Detail label="Promised delivery">
@@ -156,6 +217,49 @@ function ShipmentDetails({
         </dl>
       </CardContent>
     </Card>
+  );
+}
+
+/** A stop for the map, when the shipment has its coordinates (they are optional at booking). */
+function stopOf(lat: number | null, lng: number | null, city: string): Stop | null {
+  return lat === null || lng === null ? null : { lat, lng, city };
+}
+
+/**
+ * Pickup, delivery, the route between them and the latest position. Shown when there is at least
+ * one point to draw; the addresses and "Last seen" stay as text either way. The route follows
+ * real roads when the committed fixture knows the pair (seeded shipments), and is a straight line
+ * otherwise; only that one LineString is sent to the browser.
+ */
+function ShipmentRouteMap({
+  shipment,
+  lastPosition,
+}: {
+  shipment: Shipment;
+  lastPosition: LivePosition | null | undefined;
+}) {
+  const origin = stopOf(shipment.originLat, shipment.originLng, shipment.originCity);
+  const destination = stopOf(
+    shipment.destinationLat,
+    shipment.destinationLng,
+    shipment.destinationCity,
+  );
+  // An active shipment is drawn even before its first ping: the marker appears with it.
+  if (!origin && !destination && lastPosition === undefined) return null;
+
+  return (
+    <RouteMap
+      shipment={{
+        shipmentId: shipment.id,
+        trackingCode: shipment.trackingCode,
+        status: shipment.status,
+        destinationCity: shipment.destinationCity,
+      }}
+      origin={origin}
+      destination={destination}
+      route={origin && destination ? routeBetween(origin, destination) : null}
+      initialPosition={lastPosition}
+    />
   );
 }
 
@@ -184,68 +288,5 @@ function Detail({ label, children }: { label: string; children: React.ReactNode 
       <dt className="text-muted-foreground">{label}</dt>
       <dd>{children}</dd>
     </div>
-  );
-}
-
-function ShipmentHistory({
-  events,
-  className,
-}: {
-  events: ShipmentEventWithActor[];
-  className?: string;
-}) {
-  const newestFirst = [...events].reverse();
-  return (
-    <Card className={className}>
-      <CardHeader>
-        <CardTitle>
-          <h2>History</h2>
-        </CardTitle>
-        <CardDescription>Every change is recorded and cannot be edited.</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <Timeline aria-label="Shipment history">
-          {newestFirst.map((event, index) => (
-            <TimelineItem key={event.id} highlighted={index === 0}>
-              <div className="flex flex-col gap-1 text-sm">
-                <div className="flex flex-wrap items-baseline justify-between gap-x-4">
-                  <span className="font-medium">
-                    {shipmentEventTitle(event.type, event.toStatus)}
-                  </span>
-                  <time dateTime={event.occurredAt.toISOString()} className="text-muted-foreground">
-                    {formatDateTime(event.occurredAt)}
-                  </time>
-                </div>
-                <p className="flex flex-wrap items-center gap-x-1.5 text-muted-foreground">
-                  <span>by {event.actorName ?? "System"}</span>
-                  {event.locationCity && (
-                    <>
-                      <span aria-hidden="true">·</span>
-                      <MapPinIcon className="size-3.5" aria-hidden="true" />
-                      <span>{event.locationCity}</span>
-                    </>
-                  )}
-                </p>
-                {event.publicNote && (
-                  <p>
-                    <span className="sr-only">Note for the customer: </span>
-                    {event.publicNote}
-                  </p>
-                )}
-                {event.internalNote && (
-                  <p className="flex items-start gap-1.5 rounded-md bg-muted px-2 py-1.5">
-                    <LockIcon className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
-                    <span>
-                      <span className="sr-only">Internal note: </span>
-                      {event.internalNote}
-                    </span>
-                  </p>
-                )}
-              </div>
-            </TimelineItem>
-          ))}
-        </Timeline>
-      </CardContent>
-    </Card>
   );
 }
