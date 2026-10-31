@@ -1,0 +1,42 @@
+/*
+ * Brings MapLibre's controls and popups in line with the app's look. Loaded right after
+ * maplibre-gl.css (see maplibre.ts), so equal-specificity rules here win.
+ */
+
+.maplibregl-map {
+  font: inherit;
+}
+
+.maplibregl-popup-content {
+  border-radius: calc(var(--radius) + 2px);
+  padding: 0.75rem 2rem 0.75rem 0.875rem;
+  color: #0f172a;
+  box-shadow:
+    0 10px 15px -3px rgb(0 0 0 / 0.12),
+    0 4px 6px -4px rgb(0 0 0 / 0.12);
+}
+
+.maplibregl-popup-close-button {
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: var(--radius);
+  font-size: 1.125rem;
+  line-height: 1;
+  color: #475569;
+}
+
+.maplibregl-popup-close-button:hover {
+  background-color: #f1f5f9;
+}
+
+/* Attribution stays readable but quiet; links keep the contrast of body text. */
+.maplibregl-ctrl.maplibregl-ctrl-attrib {
+  font-size: 11px;
+  line-height: 1.4;
+  color: #334155;
+  background-color: rgb(255 255 255 / 0.85);
+}
+
+.maplibregl-ctrl-attrib a {
+  color: inherit;
+}
