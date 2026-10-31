@@ -333,3 +333,28 @@ away from the pointer, making it unclickable. The effect now lives on an inner e
 
 **Cost.** MapLibre is about 290 KB gzipped and loads only on the two pages with a map, after
 hydration; no other page downloads it, and it never runs on the server.
+
+## A demo simulator that obeys every rule
+
+**Problem.** A portfolio demo should look alive when someone opens it: trucks moving along real
+roads, statuses advancing, the occasional problem. A simulator that wrote to the database directly
+would be quick to build, but it could produce states the real app would reject.
+
+**Approach** ([`src/server/simulator/`](../src/server/simulator/)): `pnpm simulate` acts as each
+truck's assigned driver and goes through the real services only (`recordLocationPing`,
+`changeShipmentStatus`), so every rule, throttle, history entry and realtime message applies. Routes
+are OpenStreetMap road geometry fetched once from OSRM and committed as a 60 KB fixture, so there is
+no runtime dependency on a public routing server. The planner (route interpolation, next action) is
+pure and tested over whole routes against the state machine; the script is thin wiring that re-reads
+status and version every tick and re-plans when a service refuses an action.
+
+**Interesting bug.** The simulator first remembered "this exception is mine to clear" in memory. A
+restart, or a `--once` run, then treated its own exception as an office hold and left the shipment
+stuck forever.
+
+- Marking simulator exceptions with special note text: fragile, and it leaks into customer text.
+- A new table for simulator state: extra schema for a demo tool.
+- Clearing every exception: overrides real office holds.
+- **Chosen:** read ownership from the append-only history each tick. If the truck's driver
+  recorded the exception, the driver clears it; otherwise it waits for the office. It mirrors real
+  ownership, survives restarts and needs no new state.
