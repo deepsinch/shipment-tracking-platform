@@ -45,6 +45,23 @@ the server-side session, never from client input. Services receive an `AuthConte
 (`userId`, `organizationId`, `role`) and every query filters by `organizationId`.
 Looking up a shipment from another org returns "not found", never "forbidden", so ids cannot be probed.
 
+The database backs this up: `shipment_events` has a composite foreign key
+`(shipment_id, organization_id) -> shipments (id, organization_id)`, so an event can never belong to a
+different organization than its shipment. CHECK constraints (positive weight, coordinate ranges,
+ISO-2 country codes, status changes with a target status) complement Zod validation in services.
+
+## Authentication and sessions
+
+- Sign-up creates the user, then a new organization with the user as `admin`, then signs in.
+  A session hook makes the user's organization the session's active organization.
+- `AuthContext` is built per request from the session plus the `member` row, so role changes apply
+  immediately.
+- Access checks are layered: `proxy.ts` redirects requests without a session cookie (optimistic, no
+  validation); `requireAuthContext()` in layouts, pages and Server Actions is the real check; services
+  require an `AuthContext` argument and filter by its organization.
+- Better Auth owns membership and org settings permissions (only admins manage the org). Shipment
+  permissions are domain rules enforced in services.
+
 ## Shipment lifecycle
 
 Status is a finite state machine defined in `src/domain/shipment-status.ts`:
@@ -113,3 +130,5 @@ people who hold the code.
 | 4   | Org from session, never from input                             | Prevents cross-tenant access by construction                                                     | Passing org id in URLs                                                            |
 | 5   | Better Auth with organization plugin                           | Orgs, members and roles out of the box, Drizzle adapter                                          | Auth.js (no built-in orgs), Clerk (hosted, vendor lock-in)                        |
 | 6   | Integration tests against a real Postgres, re-migrated per run | Triggers, enums, FKs and transactions are what we need to prove; mocks or SQLite cannot run them | Mocked DB layer, pg-mem, Testcontainers (no Docker here)                          |
+| 7   | Tenant consistency enforced by a composite FK                  | Makes a cross-org event impossible even with an application bug                                  | App-level checks only; a trigger                                                  |
+| 8   | Role read from the membership row per request                  | Demotions and removals take effect immediately                                                   | Role cached in the session or a JWT (stale until expiry)                          |
