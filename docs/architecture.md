@@ -381,7 +381,7 @@ message)` (organization; for drivers, assigned or previous driver) and is projec
   (the default), one instance serves many concurrent invocations, so many streams share one
   `LISTEN` connection; without it, every stream would be its own instance with its own
   connection, which does not scale beyond a demo. Streams are billed while open (active CPU is
-  low, they mostly wait). `maxDuration = 300` is the default ceiling on current plans; a plan with
+  low, they mostly wait). `maxDuration = 300` is the Fluid compute default on every plan and the Hobby maximum (Pro allows up to 800 s; see [Vercel's duration docs](https://vercel.com/docs/functions/configuring-functions/duration), checked October 2026); a plan with
   a lower limit needs `REALTIME_STREAM_SECONDS` lowered below it. Instances that go idle are
   frozen, which simply ends their streams; clients reconnect and resync.
 - **HTTP/1.1.** Browsers allow about six connections per origin over HTTP/1.1, and each tab's

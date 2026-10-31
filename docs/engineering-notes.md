@@ -276,3 +276,33 @@ never accepted for a shipment delivered mid-flight.
 
 **Telemetry is not history.** Pings live in their own tables (decision 13). They reject `UPDATE`
 like history does, but allow `DELETE` so the 30-day retention purge can run.
+
+## Live updates without a replay log, and the race hiding in "re-fetch on reconnect"
+
+**Problem.** Dashboards, the shipment page and the driver app update without reloads. The design
+(decisions 15–16) treats realtime messages as invalidations: services `pg_notify` inside their
+transaction, one `LISTEN` connection per server instance fans out to SSE streams, and clients
+re-fetch rather than replaying an event log. The hidden race: the browser's EventSource `open`
+event only means the HTTP response started. The server's `LISTEN` may not be active yet, so a change
+committed in that gap is never announced, and a client that re-fetched on `open` would never learn
+about it.
+
+**Options considered.**
+
+- Re-fetch on `open`: racy, as above.
+- Make the route wait for `LISTEN` before responding: needs a timeout and an error path, and
+  EventSource treats a non-200 response as fatal (no automatic reconnect).
+- Replay a log with `Last-Event-ID`: contradicts the invalidation design and adds state.
+- **Chosen:** the bus itself sends `resync` to each subscriber once its subscription is live, and
+  again after every listener reconnect. Clients re-fetch (and show "Live") only on that event. It
+  closes the race with no new state.
+
+**Isolation.** Each message is checked against the viewer (organization, and for drivers their
+current or previous assignment) and projected to a client shape with no organization or user ids.
+Tests prove a stream never receives another organization's event using a sentinel: Postgres
+delivers notifications in commit order, so once a later event has arrived, an earlier one would have
+too. Proving absence without sleeping is otherwise impossible.
+
+**Hosting.** `LISTEN` needs a direct connection (transaction poolers do not support it). Streams
+close themselves at 270 s, under the 300 s function limit, and reconnect. A refresh is deferred
+while a form has unsaved input, with a "Show latest" prompt instead of wiping what someone typed.

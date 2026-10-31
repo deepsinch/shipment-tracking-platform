@@ -41,6 +41,11 @@ src/
   for drivers). Never hand-write the scope in a query.
 - Anything public (tracking page, later the public API) selects an explicit column list, never a whole
   row, and has a test asserting the exact set of returned keys.
+- Realtime: every write that changes what someone sees publishes on the `RealtimeBus` inside its own
+  transaction (delivered only on commit). Messages are invalidations; clients re-fetch on the
+  server's `resync`. What reaches a browser is an explicit projection (`toClientEvent`), filtered
+  by `isVisibleTo` (organization, driver scope); never organization or user ids.
+- Forms whose input a live refresh could wipe carry `data-unsaved-guard`.
 - Anything with history (users, organizations, shipments) is deactivated, never hard-deleted: foreign keys
   to history are `restrict`.
 - Database constraints (CHECKs, composite FKs) complement Zod validation; they never replace it.
