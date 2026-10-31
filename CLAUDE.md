@@ -46,6 +46,10 @@ src/
   server's `resync`. What reaches a browser is an explicit projection (`toClientEvent`), filtered
   by `isVisibleTo` (organization, driver scope); never organization or user ids.
 - Forms whose input a live refresh could wipe carry `data-unsaved-guard`.
+- Maps (MapLibre) are client-only and supplementary: every map has a text equivalent that keyboard
+  and screen-reader users can use, and the public page never shows a map or coordinates.
+- E2E specs import `test` from `tests/e2e/fixtures.ts` (map tiles blocked, no network dependency);
+  contexts a spec creates itself call `blockMapTiles`.
 - Anything with history (users, organizations, shipments) is deactivated, never hard-deleted: foreign keys
   to history are `restrict`.
 - Database constraints (CHECKs, composite FKs) complement Zod validation; they never replace it.
@@ -82,6 +86,7 @@ src/
   and public pages are designed for 390px first); fix what looks off and say so in the report.
 - Update `docs/implementation-notes.md` as you go: tick finished items, record gotchas a newcomer
   would trip over.
+- Stop every dev or production server you started before reporting; leave no background processes.
 - If blocked by the environment (network, missing tool), stop and report the exact error. No mirrors,
   alternative registries or other workarounds without the architect's approval.
 

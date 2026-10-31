@@ -306,3 +306,30 @@ too. Proving absence without sleeping is otherwise impossible.
 **Hosting.** `LISTEN` needs a direct connection (transaction poolers do not support it). Streams
 close themselves at 270 s, under the 300 s function limit, and reconnect. A refresh is deferred
 while a form has unsaved input, with a "Show latest" prompt instead of wiping what someone typed.
+
+## A live map that mixes server renders and client events
+
+**Problem.** Marker positions arrive as live events in the browser, but which shipments exist and
+their status change on the server. Two sources of truth meet in one component.
+
+**Options considered.**
+
+- A snapshot endpoint the map re-fetches on resync: a second data path to authorize and test, and it
+  duplicates the coalescing and hidden-page logic the live refresh already has.
+- Copy the server snapshot into client state once: later server refreshes silently stop reaching it.
+- Re-fetch on every position event: wasteful at one event per vehicle every 10 seconds.
+- **Chosen:** derive the markers on every render as `mergeFleet(snapshotProp, liveFixes)`. The
+  snapshot decides which shipments exist; live fixes only move them, and the newest device time wins
+  in either order. The page refreshes only for structural changes (a status change, or the first ping
+  of a shipment the snapshot does not have yet). The merge is a pure, unit-tested function, and an
+  end-to-end test proves markers move, appear and disappear without a reload.
+
+**Accessibility.** The map is supplementary: a list beside it carries the same information, and
+keyboard users reach every marker's link from there. Marker easing respects `prefers-reduced-motion`.
+
+**Gotcha worth telling.** CSS applies the individual `scale` property before `transform`, so a hover
+scale on a MapLibre marker scaled its positioning translation and the marker jumped about 40 px
+away from the pointer, making it unclickable. The effect now lives on an inner element.
+
+**Cost.** MapLibre is about 290 KB gzipped and loads only on the two pages with a map, after
+hydration; no other page downloads it, and it never runs on the server.
