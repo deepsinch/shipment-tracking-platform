@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+
 import { config as loadEnv } from "dotenv";
 import { defineConfig, devices } from "@playwright/test";
 
@@ -6,6 +8,15 @@ loadEnv({ quiet: true });
 
 const PORT = 3100;
 const baseURL = `http://localhost:${PORT}`;
+
+/**
+ * This environment ships a preinstalled Chromium (never run `playwright install` here). Elsewhere,
+ * PLAYWRIGHT_CHROMIUM points at a binary, or Playwright uses its own installed browser.
+ */
+const PREINSTALLED_CHROMIUM = "/opt/pw-browsers/chromium";
+const chromiumPath =
+  process.env.PLAYWRIGHT_CHROMIUM ??
+  (existsSync(PREINSTALLED_CHROMIUM) ? PREINSTALLED_CHROMIUM : undefined);
 
 const databaseUrl = process.env.E2E_DATABASE_URL;
 if (!databaseUrl) {
@@ -32,10 +43,7 @@ export default defineConfig({
       name: "chromium",
       use: {
         ...devices["Desktop Chrome"],
-        // Preinstalled browser; never run `playwright install` in this environment.
-        launchOptions: {
-          executablePath: process.env.PLAYWRIGHT_CHROMIUM ?? "/opt/pw-browsers/chromium",
-        },
+        launchOptions: { executablePath: chromiumPath },
       },
     },
   ],
