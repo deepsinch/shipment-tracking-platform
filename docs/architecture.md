@@ -62,6 +62,43 @@ ISO-2 country codes, status changes with a target status) complement Zod validat
 - Better Auth owns membership and org settings permissions (only admins manage the org). Shipment
   permissions are domain rules enforced in services.
 
+## Shipment access
+
+Shipment permissions are pure rules in `src/domain/shipment-permissions.ts`, enforced by the services:
+
+| Role       | Create | See and change                     |
+| ---------- | ------ | ---------------------------------- |
+| Admin      | yes    | every shipment in the organization |
+| Dispatcher | yes    | every shipment in the organization |
+| Driver     | no     | only shipments assigned to them    |
+
+Every service that reads or changes a shipment builds its `WHERE` clause from one helper,
+`visibleShipments(ctx)` in `src/server/services/shipment-access.ts`: the caller's organization, plus
+`assigned_driver_id = userId` for drivers. A shipment outside that scope does not match and is
+reported as not found, whether it belongs to another organization or to another driver. Creating a
+shipment as a driver is the one explicit `forbidden`: there is no record whose existence it could
+reveal. A driver can only be assigned if they are a `driver` member of the same organization.
+
+## Services
+
+Use cases live in `src/server/services/`, one file per use case: `createShipment`, `listShipments`,
+`getShipment`, `changeShipmentStatus` and `getPublicTracking`. Each takes an `AuthContext` argument
+(except the public lookup) instead of reading the session, so it runs in tests without Next.js.
+
+- **Expected outcomes are values.** Results are discriminated unions on `ok` and `reason`
+  (`validation` with `fieldErrors` keyed by field path, `forbidden`, `not_found`, `conflict`,
+  `invalid_transition`). Services throw only for unexpected failures.
+- **Input is `unknown`** and parsed with Zod. Schemas coerce strings, because forms and URL search
+  params submit strings, and treat blank optional fields as absent.
+- **Transactions contain only database work** and are kept short. Validation and permission checks
+  happen before the transaction starts.
+- **Tracking code collisions** are retried inside the creating transaction with
+  `INSERT ... ON CONFLICT (tracking_code) DO NOTHING RETURNING`, so a collision is "no row" rather
+  than an error that would abort the transaction (up to 5 attempts, then an exception).
+- **Listing** filters by organization (and status), sorts by `created_at DESC, id DESC` (the `id`
+  tie-break keeps pages stable), and counts the total with the same `WHERE`. Search matches the
+  normalized tracking code exactly, or any part of the reference (`ILIKE`, wildcards escaped).
+
 ## Shipment lifecycle
 
 Status is a finite state machine defined in `src/domain/shipment-status.ts`:
@@ -105,6 +142,19 @@ Status changes use optimistic concurrency: `shipments.version` is incremented on
 update is `WHERE id = $1 AND version = $expected`. Zero rows updated means someone else changed it
 first; the user gets a clear conflict message and fresh data instead of a silent overwrite.
 
+`changeShipmentStatus` runs in one transaction:
+
+1. Read the shipment within the caller's scope (`not_found` if absent).
+2. If `version` differs from the expected one, return `conflict` with the current row. This is
+   checked before the state machine, because a transition picked on a stale form is meaningless.
+3. `canTransition(from, to)` or return `invalid_transition`.
+4. `UPDATE ... SET status, version = version + 1 WHERE id AND <scope> AND version = expected
+RETURNING *`. Under READ COMMITTED a concurrent writer blocks on the row lock; once it commits,
+   Postgres re-evaluates `version = expected` against the new row, matches nothing, and we return
+   `conflict`. This guard, not step 2, is what prevents lost updates.
+5. Insert the `status_changed` event with `from_status` from step 1 (safe: the guarded update proves
+   the row did not change in between).
+
 ## Tracking codes
 
 Format `WB-XXXX-XXXX`, using Crockford base32 (no I, L, O, U, so codes are easy to read aloud and type),
@@ -115,20 +165,24 @@ and Crockford look-alikes are mapped (I and L read as 1, O reads as 0).
 
 ## Public tracking page
 
-`/track/[code]` is public. It exposes only a safe projection: status, timeline (type, time, city-level
-location, public note), origin/destination city, and ETA. It never exposes recipient email, internal
+`/track/[code]` is public. It exposes only a safe projection: tracking code, status, timeline (type,
+status entered, time, city-level location, public note), origin/destination city and country, and
+the promised delivery time. `getPublicTracking` selects an explicit column list, so new columns stay
+private by default, and a test asserts the exact key set so an accidental addition fails loudly. It never exposes recipient email, internal
 notes, driver identity, or internal ids. Pages are `noindex` because tracking data is private to the
 people who hold the code.
 
 ## Decisions log
 
-| #   | Decision                                                       | Why                                                                                              | Alternatives considered                                                           |
-| --- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------- |
-| 1   | Append-only events + status projection                         | Audit trail and customer timeline from one source of truth                                       | Status column only (loses history)                                                |
-| 2   | Optimistic concurrency via version column                      | No locks held across user think-time, conflicts are explicit                                     | `SELECT ... FOR UPDATE` (fine inside one request, but does not catch stale forms) |
-| 3   | State machine in pure TS                                       | Unit testable, shared by UI (only show allowed buttons) and server (enforce)                     | DB check constraints (cannot express transitions cleanly)                         |
-| 4   | Org from session, never from input                             | Prevents cross-tenant access by construction                                                     | Passing org id in URLs                                                            |
-| 5   | Better Auth with organization plugin                           | Orgs, members and roles out of the box, Drizzle adapter                                          | Auth.js (no built-in orgs), Clerk (hosted, vendor lock-in)                        |
-| 6   | Integration tests against a real Postgres, re-migrated per run | Triggers, enums, FKs and transactions are what we need to prove; mocks or SQLite cannot run them | Mocked DB layer, pg-mem, Testcontainers (no Docker here)                          |
-| 7   | Tenant consistency enforced by a composite FK                  | Makes a cross-org event impossible even with an application bug                                  | App-level checks only; a trigger                                                  |
-| 8   | Role read from the membership row per request                  | Demotions and removals take effect immediately                                                   | Role cached in the session or a JWT (stale until expiry)                          |
+| #   | Decision                                                            | Why                                                                                              | Alternatives considered                                                           |
+| --- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------- |
+| 1   | Append-only events + status projection                              | Audit trail and customer timeline from one source of truth                                       | Status column only (loses history)                                                |
+| 2   | Optimistic concurrency via version column                           | No locks held across user think-time, conflicts are explicit                                     | `SELECT ... FOR UPDATE` (fine inside one request, but does not catch stale forms) |
+| 3   | State machine in pure TS                                            | Unit testable, shared by UI (only show allowed buttons) and server (enforce)                     | DB check constraints (cannot express transitions cleanly)                         |
+| 4   | Org from session, never from input                                  | Prevents cross-tenant access by construction                                                     | Passing org id in URLs                                                            |
+| 5   | Better Auth with organization plugin                                | Orgs, members and roles out of the box, Drizzle adapter                                          | Auth.js (no built-in orgs), Clerk (hosted, vendor lock-in)                        |
+| 6   | Integration tests against a real Postgres, re-migrated per run      | Triggers, enums, FKs and transactions are what we need to prove; mocks or SQLite cannot run them | Mocked DB layer, pg-mem, Testcontainers (no Docker here)                          |
+| 7   | Tenant consistency enforced by a composite FK                       | Makes a cross-org event impossible even with an application bug                                  | App-level checks only; a trigger                                                  |
+| 8   | Role read from the membership row per request                       | Demotions and removals take effect immediately                                                   | Role cached in the session or a JWT (stale until expiry)                          |
+| 9   | Driver scope as a shared `WHERE` helper, out-of-scope = not found   | One place for tenant and role scoping; drivers cannot probe which shipments exist                | Per-service checks after loading the row; `forbidden` for drivers                 |
+| 10  | Tracking code retry via `ON CONFLICT DO NOTHING` in the transaction | A unique violation would abort the transaction; this avoids savepoints and error-code parsing    | Catch `23505` and retry the whole transaction; savepoint per attempt              |

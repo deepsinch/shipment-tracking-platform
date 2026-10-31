@@ -11,8 +11,9 @@ Work proceeds in reviewable checkpoints: (1) scaffold + tooling, (2) DB, (3) aut
 (4) services + integration tests, (5) UI, (6) seed + e2e + README + docs. Finish one, get it green,
 commit, stop for architect review.
 
-**Checkpoint reached: 3 (auth).** format:check, lint, typecheck, test (53 unit + 24 integration) and
-build pass. Next: checkpoint 4 (services + integration tests).
+**Checkpoint reached: 4 (services + integration tests).** format:check, lint, typecheck, test
+(56 unit + 70 integration) and build pass. Next: checkpoint 5 (UI and the thin Server Action /
+page wiring that calls the services).
 
 Done:
 
@@ -40,7 +41,7 @@ Next (remaining Phase 1 scope, from the original brief):
 - [x] Better Auth: email/password + organization plugin, roles admin/dispatcher/driver; sign-up creates
       a user plus a new org where they are admin; sign-in, sign-out; session helper returning
       `AuthContext` or redirecting; protection for `/dashboard`. Pages are unstyled placeholders.
-- [ ] Services in `src/server/services/`: `createShipment`, `listShipments` (pagination, status filter,
+- [x] Services in `src/server/services/`: `createShipment`, `listShipments` (pagination, status filter,
       search by code or reference), `getShipment`, `changeShipmentStatus` (one transaction; result union
       ok / invalid_transition / conflict / not_found), `getPublicTracking(code)` (safe projection only).
       Drivers cannot create shipments in Phase 1.
@@ -50,7 +51,7 @@ Next (remaining Phase 1 scope, from the original brief):
       `/track/[code]` (public, `generateMetadata`, noindex, friendly not-found).
 - [ ] Seed: "Demo Freight Co", admin@/dispatcher@/driver@demo.test, ~30 shipments across all statuses
       with valid event histories and real city coordinates; re-runnable.
-- [ ] Integration tests against `waybill_test`: changeShipmentStatus (happy path, invalid transition,
+- [x] Integration tests against `waybill_test`: changeShipmentStatus (happy path, invalid transition,
       stale version conflict, cross-org not_found) and the append-only trigger.
 - [ ] Playwright happy path: dispatcher signs in, creates a shipment, advances status, opens the public page.
 - [ ] README: features, stack, setup, demo credentials, scripts, link to architecture.
@@ -165,6 +166,42 @@ drizzle-orm 0.45.4, drizzle-kit 0.31.11, pg 8.23, zod 4.6.7, @playwright/test 1.
   the `Set-Cookie` headers; turn them into a `cookie` request header for `auth.api.getSession`.
   `nextCookies()` is safe outside a request (it catches the missing request scope).
 
+### Services (checkpoint 4)
+
+- **Layout:** one file per use case in `src/server/services/`, each with an `*.integration.test.ts`
+  next to it. Shared pieces: `results.ts` (result unions, `fieldErrorsOf`), `validation.ts` (Zod
+  helpers for form strings), `shipment-access.ts` (`visibleShipments(ctx)`, the tenant + driver scope).
+  Role rules are pure in `src/domain/shipment-permissions.ts`.
+- **Services take `input: unknown`** and parse it with Zod, like `signUpWithOrganization`. Schemas
+  coerce numbers and dates (forms and URL params send strings) and treat blank optional fields as
+  absent, so checkpoint 5 can pass `Object.fromEntries(formData)` almost directly. For
+  `changeShipmentStatus`, `location` is nested (`location.city`, `location.lat`, `location.lng`);
+  field errors use dotted keys for it.
+- **Drivers see only assigned shipments everywhere** (list, get, change), not just in
+  `changeShipmentStatus`. Out of scope is always `not_found`; only `createShipment` returns
+  `forbidden` for drivers.
+- **Malformed UUIDs are `not_found`**, checked before querying; otherwise Postgres raises `22P02`
+  on the uuid cast.
+- **Conflict results carry `current`** (the fresh row) so the UI can show what changed.
+- **Gotcha: a failed statement aborts a Postgres transaction.** That is why the tracking code retry
+  uses `ON CONFLICT (tracking_code) DO NOTHING RETURNING` (no row = collision) instead of catching
+  `23505`. `createShipment` takes an optional `deps.generateTrackingCode` for the collision test.
+- **Gotcha: concurrency tests are racy unless forced.** The concurrency test holds the shipment row
+  with `SELECT ... FOR UPDATE` in a third transaction, waits until `pg_stat_activity` shows two
+  backends blocked on a lock, then commits. Both changes have then provably passed the version
+  pre-check, so the test exercises the guarded `UPDATE` (removing `version = expected` from it turns
+  the test red; verified). Integration files run serially, so no other test holds locks meanwhile.
+- **Proven-red checks (checkpoint 4):** removing the version guard (1 test red), removing the org
+  filter from `visibleShipments` (7 red), removing the driver filter (3 red), adding `internalNote`
+  to the public timeline (3 red). All restored.
+- **Public tracking timeline includes `status`** (the status each event entered), beyond the
+  type/time/city/note in the original brief: `type` alone ("status_changed") is meaningless to a
+  customer.
+- `getShipment` returns raw events (with `actorUserId`, not names). The UI may want actor names
+  in checkpoint 5: add a left join on `user` there.
+- Reference search is `ILIKE '%term%'`, which no index serves; fine at small-carrier scale within
+  one organization's rows. A `pg_trgm` index is the fix if it ever matters.
+
 ### Testing
 
 - `pnpm test` runs two Vitest projects: `unit` (`src/**/*.test.ts`) and `integration`
@@ -174,6 +211,8 @@ drizzle-orm 0.45.4, drizzle-kit 0.31.11, pg 8.23, zod 4.6.7, @playwright/test 1.
   the `public` and `drizzle` schemas of that database, then applies every committed migration. It
   refuses to run unless the database name ends in `_test`.
 - For code under test, `DATABASE_URL` is overridden to `TEST_DATABASE_URL`. Files run serially.
+- `createTestContext(orgId, role)` in `tests/integration/fixtures.ts` creates a member and returns
+  the `AuthContext` a service receives for them.
 - Tests never clean up: fixtures use random ids, so tests are isolated without deleting rows
   (history rows cannot be deleted anyway).
 
