@@ -3,6 +3,7 @@ import "server-only";
 import { and, eq, isNotNull, max, sql } from "drizzle-orm";
 import { z } from "zod";
 
+import { isTooFarInFuture } from "@/domain/device-time";
 import { canSetStatus } from "@/domain/shipment-permissions";
 import { canTransition, SHIPMENT_STATUSES, type ShipmentStatus } from "@/domain/shipment-status";
 import type { AuthContext } from "@/server/auth/auth-context";
@@ -20,9 +21,6 @@ import {
 import { visibleShipments } from "./shipment-access";
 import { blankToUndefined, optionalCoordinate, optionalText } from "./validation";
 
-/** Tolerated clock difference between a driver's device and the server. */
-const MAX_CLOCK_SKEW_MS = 5 * 60 * 1000;
-
 export const changeShipmentStatusSchema = z.object({
   shipmentId: z.uuid(),
   /** The `version` the user saw when they opened the form. */
@@ -32,10 +30,7 @@ export const changeShipmentStatusSchema = z.object({
   occurredAt: blankToUndefined(
     z.coerce
       .date({ error: "Enter a valid date and time" })
-      .refine(
-        (date) => date.getTime() <= Date.now() + MAX_CLOCK_SKEW_MS,
-        "The time cannot be in the future",
-      ),
+      .refine((date) => !isTooFarInFuture(date, new Date()), "The time cannot be in the future"),
   ),
   /** Shown to the customer on the public tracking page. */
   publicNote: optionalText(500),
@@ -114,7 +109,8 @@ export async function changeShipmentStatus(
       };
     }
     // Defaulting to now could still land before an event recorded with a slightly fast device
-    // clock (see MAX_CLOCK_SKEW_MS); never order the new event before it.
+    // clock (see `MAX_CLOCK_SKEW_MS` in `@/domain/device-time`); never order the new event
+    // before it.
     const now = new Date();
     const eventTime =
       occurredAt ?? (latestOccurredAt && latestOccurredAt > now ? latestOccurredAt : now);
