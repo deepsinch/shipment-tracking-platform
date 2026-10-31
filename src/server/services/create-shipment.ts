@@ -64,7 +64,12 @@ export type CreateShipmentResult = { ok: true; shipment: Shipment } | Forbidden 
 
 export type CreateShipmentDeps = {
   /** Injectable so tests can force a tracking code collision. */
-  generateTrackingCode: () => string;
+  generateTrackingCode?: () => string;
+  /**
+   * The booking time (created_at and the created event). Injectable so the demo seed can book
+   * shipments in the past and then replay their history through `changeShipmentStatus`.
+   */
+  now?: () => Date;
 };
 
 /** A collision needs two random 40-bit codes to match; five in a row means something is broken. */
@@ -77,8 +82,11 @@ const MAX_TRACKING_CODE_ATTEMPTS = 5;
 export async function createShipment(
   ctx: AuthContext,
   input: unknown,
-  deps: CreateShipmentDeps = { generateTrackingCode },
+  deps: CreateShipmentDeps = {},
 ): Promise<CreateShipmentResult> {
+  const nextCode = deps.generateTrackingCode ?? generateTrackingCode;
+  const bookedAt = deps.now?.() ?? new Date();
+
   if (!canCreateShipments(ctx.role)) return forbidden;
 
   const parsed = createShipmentSchema.safeParse(input);
@@ -96,8 +104,10 @@ export async function createShipment(
   }
 
   const shipment = await db.transaction(async (tx) => {
-    const created = await insertWithUniqueTrackingCode(tx, deps.generateTrackingCode, {
+    const created = await insertWithUniqueTrackingCode(tx, nextCode, {
       ...fields,
+      createdAt: bookedAt,
+      updatedAt: bookedAt,
       assignedDriverId: assignedDriverId ?? null,
       organizationId: ctx.organizationId,
       createdBy: ctx.userId,

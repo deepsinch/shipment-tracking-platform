@@ -146,6 +146,20 @@ describe("createShipment", () => {
     });
   });
 
+  it("books at the injected time, for the shipment and its created event", async () => {
+    const bookedAt = new Date("2026-10-20T09:15:00Z");
+
+    const result = await createShipment(dispatcher, formInput(), { now: () => bookedAt });
+
+    if (!result.ok) throw new Error("expected a shipment");
+    expect(result.shipment.createdAt).toEqual(bookedAt);
+    const [event] = await getDb()
+      .select()
+      .from(shipmentEvents)
+      .where(eq(shipmentEvents.shipmentId, result.shipment.id));
+    expect(event?.occurredAt).toEqual(bookedAt);
+  });
+
   it("retries with a new tracking code when the generated one is taken", async () => {
     const existing = await createTestShipment(orgId, dispatcher.userId);
     const fresh = generateTrackingCode();
