@@ -11,39 +11,37 @@ Work proceeds in reviewable checkpoints: (1) scaffold + tooling, (2) DB, (3) aut
 (4) services + integration tests, (5) UI, (6) seed + e2e + README + docs. Finish one, get it green,
 commit, stop for architect review.
 
-**Checkpoint reached: 5a (review fixes, shadcn/ui, landing, auth restyle, dashboard list).**
-format:check, lint, typecheck, test (59 unit + 75 integration) and build pass.
+**Checkpoint reached: 5b (shipment pages, public tracking page, Playwright, README).**
+format:check, lint, typecheck, test (72 unit + 81 integration), build and test:e2e (3 specs) pass.
 
-Checkpoint 5 is split in two. Done in 5a:
+Checkpoint 5a (done): review fixes (drivers cannot cancel, `occurredAt` not before the latest
+event), shadcn/ui, landing page with the track form, restyled auth pages, dashboard shell, and the
+shipments list (GET filters, URL pagination, empty states, `loading.tsx`).
 
-- Review fixes: drivers cannot set `cancelled` (`canSetStatus` / `statusOptionsFor` in
-  `src/domain/shipment-permissions.ts`, `forbidden` from `changeShipmentStatus`); a backdated
-  `occurredAt` must not be before the shipment's latest event (validation error on `occurredAt`).
-- shadcn/ui set up with the CLI (`radix-nova` style, neutral, CSS variables, lucide icons).
-- `/` landing page with a "Track a shipment" form (Server Action `trackShipmentAction` normalizes the
-  code and redirects to `/track/<code>`; works without JavaScript).
-- `/sign-in`, `/sign-up` restyled in an `(auth)` layout with cards.
-- Dashboard shell (header, nav, role, sign out); `/dashboard` redirects to `/dashboard/shipments`.
-- `/dashboard/shipments`: table with status badges, search + status filter as a GET form, URL
-  pagination, empty states (none yet / no match), `loading.tsx`. Bad params redirect to the
-  unfiltered list.
+Checkpoint 5b (done):
 
-**Next, checkpoint 5b (not started):**
+- [x] `listDrivers(ctx)` service (admin/dispatcher, org-scoped, `canAssignDrivers`) with tests.
+- [x] `getShipment` returns `assignedDriverName` and `actorName` per event (left joins on `user`).
+- [x] `/dashboard/shipments/new`: form + `createShipmentAction`, field errors, values echoed back,
+      optional driver; drivers are redirected to the list; success redirects to the detail page.
+- [x] `/dashboard/shipments/[id]`: details, history (actor, city, public and internal notes), status
+      form from `statusOptionsFor`, every result kind handled, terminal statuses show no form,
+      `loading.tsx`, `not-found.tsx`, dynamic title.
+- [x] `/track/[code]`: status, plain-language copy, progress bar (`src/domain/tracking-progress.ts`),
+      route, promised/actual delivery, public timeline, `generateMetadata` with noindex, friendly
+      not-found, `loading.tsx`. Mobile-first.
+- [x] Playwright: `playwright.config.ts`, `pnpm test:e2e`, dedicated `waybill_e2e` database.
+      Specs: happy path, stale-form conflict + retry, unknown code.
+- [x] README.
+- [x] Visual check with screenshots at 1280px and 390px (new, new with errors, detail, detail with a
+      conflict, track, track not-found).
 
-- [ ] `/dashboard/shipments/new`: Server Action -> `createShipment`, field errors via `FieldShell`
-      / `TextField` / `SelectField` (`src/components/form-field.tsx`), echo values back (React 19
-      form reset), driver select (needs a small `listDrivers(ctx)` service), page hidden from
-      drivers (`canCreateShipments`), `revalidatePath("/dashboard/shipments")`, redirect to detail.
-- [ ] `/dashboard/shipments/[id]`: details, timeline with actor names (add a left join on `user`
-      in `getShipment`), status form offering `statusOptionsFor(role, status)`, hidden
-      `expectedVersion`; on `conflict` show `current` and a retry; handle `invalid_transition`,
-      `forbidden` and field errors; `loading.tsx`; `notFound()` for not_found.
-- [ ] `/track/[code]`: `getPublicTracking`, `generateMetadata`, `robots: { index: false }`,
-      friendly not-found, `loading.tsx`.
-- [ ] Playwright: `playwright.config.ts` using the preinstalled chromium
-      (`executablePath: "/opt/pw-browsers/chromium"`), `test:e2e` script that builds and starts the app against a
-      dedicated e2e database (e.g. `waybill_e2e`, migrated in global setup), one happy path
-      (sign up, create, advance status, public page shows the timeline).
+**Next, checkpoint 6:**
+
+- [ ] `pnpm db:seed`: "Demo Freight Co", admin@/dispatcher@/driver@demo.test, ~30 shipments across
+      all statuses with valid event histories and real city coordinates; re-runnable. Replace the
+      README placeholder with the demo credentials.
+- [ ] Final Phase 1 docs pass (architecture, engineering notes) and all done criteria.
 
 Done:
 
@@ -59,8 +57,8 @@ Next (remaining Phase 1 scope, from the original brief):
 - [x] Tooling: TypeScript strict, ESLint, Prettier, Vitest, scripts `dev`, `build`, `lint`, `typecheck`,
       `test`, `format`.
 - [x] DB scripts: `db:generate`, `db:migrate`, plus `auth:generate` (regenerates the Better Auth schema).
-- [ ] Remaining scripts: `db:seed` (checkpoint 6), `test:e2e` with Playwright `executablePath`
-      (first e2e run from checkpoint 5).
+- [x] `test:e2e` with Playwright `executablePath` (checkpoint 5b).
+- [ ] `db:seed` (checkpoint 6).
 - [x] Drizzle schema: Better Auth tables (user, session, account, verification, organization, member,
       invitation), `shipments`, `shipment_events`, indexes for org-scoped listing and status filtering.
 - [x] Migration with a trigger that raises on UPDATE/DELETE (and TRUNCATE) of `shipment_events`.
@@ -75,7 +73,7 @@ Next (remaining Phase 1 scope, from the original brief):
       search by code or reference), `getShipment`, `changeShipmentStatus` (one transaction; result union
       ok / invalid_transition / conflict / not_found), `getPublicTracking(code)` (safe projection only).
       Drivers cannot create shipments in Phase 1.
-- [ ] UI: `/`, `/sign-in`, `/sign-up`, `/dashboard/shipments` (table, filter, search, URL-param pagination),
+- [x] UI: `/`, `/sign-in`, `/sign-up`, `/dashboard/shipments` (table, filter, search, URL-param pagination),
       `/dashboard/shipments/new` (Zod + Server Action, field errors), `/dashboard/shipments/[id]`
       (details, timeline, status form with only allowed next statuses, conflict handling),
       `/track/[code]` (public, `generateMetadata`, noindex, friendly not-found).
@@ -83,8 +81,8 @@ Next (remaining Phase 1 scope, from the original brief):
       with valid event histories and real city coordinates; re-runnable.
 - [x] Integration tests against `waybill_test`: changeShipmentStatus (happy path, invalid transition,
       stale version conflict, cross-org not_found) and the append-only trigger.
-- [ ] Playwright happy path: dispatcher signs in, creates a shipment, advances status, opens the public page.
-- [ ] README: features, stack, setup, demo credentials, scripts, link to architecture.
+- [x] Playwright happy path: signs up, creates a shipment, advances status, opens the public page.
+- [ ] README: features, stack, setup, scripts, docs links done; demo credentials in checkpoint 6.
 - [ ] Run all done criteria: lint, typecheck, test, build, test:e2e.
 
 ## Roadmap
@@ -227,8 +225,7 @@ drizzle-orm 0.45.4, drizzle-kit 0.31.11, pg 8.23, zod 4.6.7, @playwright/test 1.
 - **Public tracking timeline includes `status`** (the status each event entered), beyond the
   type/time/city/note in the original brief: `type` alone ("status_changed") is meaningless to a
   customer.
-- `getShipment` returns raw events (with `actorUserId`, not names). The UI may want actor names
-  in checkpoint 5: add a left join on `user` there.
+- `getShipment` left-joins `user` for actor and driver names (checkpoint 5b).
 - Reference search is `ILIKE '%term%'`, which no index serves; fine at small-carrier scale within
   one organization's rows. A `pg_trgm` index is the fix if it ever matters.
 
@@ -249,6 +246,37 @@ drizzle-orm 0.45.4, drizzle-kit 0.31.11, pg 8.23, zod 4.6.7, @playwright/test 1.
 - Filters are a plain GET form, so the list works without JavaScript and URLs are shareable.
 - The dev database `waybill` has a throwaway org from a visual check (`visual-*@example.test`,
   password `password123`, 24 rows); harmless, wiped by any reseed.
+
+### UI and e2e (checkpoint 5b)
+
+- **Server Action files (`"use server"`) may only export async functions.** Constants such as the
+  form field list stay module-private; types are fine (erased).
+- **Status form and conflicts:** `useActionState` lives in `StatusChangeForm`, above the `<form>`,
+  and the form is keyed by `version`. On `conflict` the action calls `revalidatePath`, the page
+  re-renders with the fresh shipment, the form remounts on the new version (hidden
+  `expectedVersion`), and the message plus the echoed notes survive in the action state. If the
+  chosen status is no longer offered, the select falls back to "Choose a status". Without the
+  `revalidatePath` the stale tab keeps old data (verified: the conflict e2e goes red).
+- **`datetime-local` has no time zone.** The UI shows UTC, so the actions append `Z`
+  (`dateTimeLocalAsUtc` in `src/lib/form-data.ts`); otherwise the server's zone would apply.
+- **Forms use `noValidate`** so the service's messages (one source of truth) show instead of the
+  browser's bubbles; `required` stays for `aria-required`.
+- **Not-found after streaming:** dynamic pages have a `loading.tsx`, so `notFound()` runs after the
+  stream started and the response is a 200 with `noindex` (Next documents this). Acceptable for
+  these pages; a proxy check would be needed for a real 404 status.
+- **`generateMetadata` and the page share one lookup** via React `cache()` (detail and track pages).
+- **Playwright starts `webServer` before `globalSetup`.** So database preparation is the first step
+  of the web server command (`tsx tests/e2e/prepare-database.ts && next build && next start`),
+  which guarantees it finishes before the app starts. `reuseExistingServer` is off so a server on
+  another database is never reused. The e2e app runs on :3100 with `BETTER_AUTH_URL` to match.
+- **e2e database:** `E2E_DATABASE_URL` (in `.env`, see `.env.example`); the name must end in `_e2e`.
+  It is created on first run (the `waybill` role has `CREATEDB`), then wiped and migrated every
+  run. The reset code is shared with the integration setup (`tests/support/database.ts`).
+- **e2e locators:** `getByRole` / `getByLabel` skip the hidden previous route; fieldsets give the
+  two address blocks a `group` role (scope "Country code" to `Pickup` / `Delivery`). Form messages
+  use `data-testid` (`form-alert`, `form-status`) because of the route announcer's role alert.
+- **Killing a background server:** `pkill -f "next start"` also matches the shell running it and
+  ends the command; find the PID by port (`ss -ltnp | grep 3200`) instead.
 
 ### Testing
 

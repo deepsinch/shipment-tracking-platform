@@ -82,7 +82,8 @@ reveal. A driver can only be assigned if they are a `driver` member of the same 
 ## Services
 
 Use cases live in `src/server/services/`, one file per use case: `createShipment`, `listShipments`,
-`getShipment`, `changeShipmentStatus` and `getPublicTracking`. Each takes an `AuthContext` argument
+`getShipment` (with actor and driver names), `changeShipmentStatus`, `getPublicTracking` and
+`listDrivers` (for assignment; admins and dispatchers only). Each takes an `AuthContext` argument
 (except the public lookup) instead of reading the session, so it runs in tests without Next.js.
 
 - **Expected outcomes are values.** Results are discriminated unions on `ok` and `reason`
@@ -155,6 +156,10 @@ RETURNING *`. Under READ COMMITTED a concurrent writer blocks on the row lock; o
 5. Insert the `status_changed` event with `from_status` from step 1 (safe: the guarded update proves
    the row did not change in between).
 
+In the UI, a `conflict` re-renders the detail page with the fresh shipment and history, and the
+status form is rebuilt on the new `version`, keeping what the user typed, so retrying is deliberate
+and informed.
+
 ## Tracking codes
 
 Format `WB-XXXX-XXXX`, using Crockford base32 (no I, L, O, U, so codes are easy to read aloud and type),
@@ -170,7 +175,7 @@ status entered, time, city-level location, public note), origin/destination city
 the promised delivery time. `getPublicTracking` selects an explicit column list, so new columns stay
 private by default, and a test asserts the exact key set so an accidental addition fails loudly. It never exposes recipient email, internal
 notes, driver identity, or internal ids. Pages are `noindex` because tracking data is private to the
-people who hold the code.
+people who hold the code. Unknown and malformed codes get the same not-found page.
 
 ## Decisions log
 
