@@ -1,15 +1,17 @@
 import { randomUUID } from "node:crypto";
 
+import { eq } from "drizzle-orm";
 import { beforeAll, describe, expect, it } from "vitest";
 
 import type { AuthContext } from "@/server/auth/auth-context";
 import { getDb } from "@/server/db/client";
-import { shipmentEvents, type Shipment } from "@/server/db/schema";
+import { shipmentEvents, user, type Shipment } from "@/server/db/schema";
 
 import {
   createTestContext,
   createTestOrganization,
   createTestShipment,
+  createTestUser,
 } from "../../../tests/integration/fixtures";
 import { getShipment } from "./get-shipment";
 
@@ -56,6 +58,32 @@ describe("getShipment", () => {
       "picked_up",
       "in_transit",
     ]);
+  });
+
+  it("names the actor of each event, and null for system events", async () => {
+    await getDb()
+      .update(user)
+      .set({ name: "Dana Dispatcher" })
+      .where(eq(user.id, dispatcher.userId));
+
+    const result = await getShipment(dispatcher, shipment.id);
+
+    if (!result.ok) throw new Error("expected the shipment");
+    // The created event was recorded by the dispatcher; the two status changes have no actor.
+    expect(result.events.map((event) => event.actorName)).toEqual(["Dana Dispatcher", null, null]);
+  });
+
+  it("names the assigned driver, or null when unassigned", async () => {
+    expect(await getShipment(dispatcher, shipment.id)).toMatchObject({ assignedDriverName: null });
+
+    const driver = await createTestUser(dispatcher.organizationId, "driver");
+    const assigned = await createTestShipment(dispatcher.organizationId, dispatcher.userId, {
+      assignedDriverId: driver.id,
+    });
+
+    expect(await getShipment(dispatcher, assigned.id)).toMatchObject({
+      assignedDriverName: driver.name,
+    });
   });
 
   it("returns not_found for another organization's shipment", async () => {
