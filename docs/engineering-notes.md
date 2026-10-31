@@ -250,3 +250,29 @@ in that same request.
 **Related.** Wrong-surface visits (a driver opening `/dashboard`) redirect server-side inside the
 page's Suspense boundary. A role-aware `proxy.ts` would be faster, but it needs the role in the
 cookie, which conflicts with reading roles fresh on every request (decision 8).
+
+## Throttling location pings without a race
+
+**Problem.** Drivers' phones send positions, and the server should accept at most one per shipment
+every 10 seconds, even when two arrive at the same moment (two tabs, a retry, a flaky network).
+
+**Approach** ([`record-location-ping.ts`](../src/server/services/record-location-ping.ts)): one
+conditional upsert on `shipment_positions` is both the check and the write:
+`INSERT ... ON CONFLICT (shipment_id) DO UPDATE ... WHERE updated_at <= now - 10s RETURNING`.
+Postgres serializes concurrent upserts of the same row and re-checks the `WHERE` against the
+committed row, so exactly one ping wins; the ping history row is inserted only if a row came back.
+Out-of-order pings are stored but do not move the position (a per-column `CASE` keeps the newer
+fix), and a `FOR SHARE` lock on the shipment makes a concurrent status change wait, so a ping is
+never accepted for a shipment delivered mid-flight.
+
+**Options considered.**
+
+- Read the last ping, then write: races. A burst of 5 parallel pings passed against it anyway,
+  because the transactions are so short; only a forced race (hold the row lock until both requests
+  are blocked) exposed the bug. Bursts are not proof.
+- A per-shipment advisory lock: an extra round trip and easy to forget at a new call site.
+- Redis rate limiter: another service to run.
+- A max-over-pings query: slow on a growing table, and still racy.
+
+**Telemetry is not history.** Pings live in their own tables (decision 13). They reject `UPDATE`
+like history does, but allow `DELETE` so the 30-day retention purge can run.

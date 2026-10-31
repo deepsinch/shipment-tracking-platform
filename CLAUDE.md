@@ -67,6 +67,9 @@ src/
 - Never skip, weaken or delete a test to make it pass. Fix the code, or report the problem.
 - For critical guarantees (triggers, constraints, authorization), prove the test can fail (temporarily
   break the code, see it go red, restore).
+- Concurrency guarantees (conditional updates, throttles, limits) are proven with a forced race:
+  hold the row lock from a third transaction until both contenders are blocked, then release.
+  Parallel bursts alone can pass against racy code.
 - Every commit leaves the repo working: migrations apply and checks pass at each commit, not only at the tip.
 - Integration tests run against a real Postgres. The test setup refuses any database whose name does
   not end in `_test`; tests use random ids instead of cleaning up (history cannot be deleted).
