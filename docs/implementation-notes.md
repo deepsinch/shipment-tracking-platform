@@ -347,12 +347,14 @@ drizzle-orm 0.45.4, drizzle-kit 0.31.11, pg 8.23, zod 4.6.7, @playwright/test 1.
   product choice; revisit with email verification in Phase 3 ("check your email" response).
 - An org-less user (see sign-up above) is sent to `/sign-in` while still signed in, which is
   confusing. A dedicated "no organization" page would be clearer.
-- **Driver buttons have no confirmation.** "Mark as delivered" is terminal and one tap away on a
-  phone. Proof of delivery (Phase 3) will gate it; until then a mis-tap needs the office (which
-  cannot undo it either, by design of the state machine).
+- **Driver buttons have no confirmation (fix in Phase 2 checkpoint 2).** "Mark as delivered" is
+  terminal and one tap away on a phone, and nobody can undo it. Architect decision: terminal
+  statuses (delivered, cancelled) get a confirm step in both surfaces until proof of delivery
+  (Phase 3) replaces it for delivery.
 - **Drivers see internal notes and other drivers' names in the history** (getShipment returns the
-  organization's full history to any member who can see the shipment). Intended: office notes
-  such as gate codes are for drivers. Revisit if notes ever need a staff-only level.
+  organization's full history to any member who can see the shipment). Architect decision: keep.
+  Internal means "inside the company", and office notes such as gate codes are for drivers. Revisit
+  only if notes ever need a staff-only level.
 - **Wrong-surface redirects are client-side** (see checkpoint 1 gotchas). A role-aware proxy
   would need the role in the session cookie, which conflicts with decision 8.
 

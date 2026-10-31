@@ -70,6 +70,8 @@ src/
 - Every commit leaves the repo working: migrations apply and checks pass at each commit, not only at the tip.
 - Integration tests run against a real Postgres. The test setup refuses any database whose name does
   not end in `_test`; tests use random ids instead of cleaning up (history cannot be deleted).
+- Every UI checkpoint includes a visual check with Playwright screenshots at 390px and 1280px (driver
+  and public pages are designed for 390px first); fix what looks off and say so in the report.
 - Update `docs/implementation-notes.md` as you go: tick finished items, record gotchas a newcomer
   would trip over.
 - If blocked by the environment (network, missing tool), stop and report the exact error. No mirrors,
