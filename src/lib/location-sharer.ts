@@ -98,6 +98,9 @@ export function startLocationSharing(deps: LocationSharerDeps): { stop: () => vo
         return;
       }
       if (outcome.status === "sent") update({ mode: "sharing", lastSentAt: now() });
+      // Another ping for this shipment (another tab or device) won the window: try this fix again
+      // in the next one, unless a newer fix has arrived meanwhile.
+      if (outcome.status === "throttled") pending ??= fix;
       if (outcome.status === "rejected" && state.mode === "sharing") {
         update({ ...state, problem: outcome.message });
       }

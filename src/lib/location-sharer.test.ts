@@ -188,12 +188,24 @@ describe("startLocationSharing", () => {
     expect(sent).toHaveLength(3);
   });
 
-  it("treats a throttled ping as harmless", async () => {
+  it("retries a throttled fix in the next window, unless a newer one arrived", async () => {
     reply = async () => ({ status: "throttled" });
     start();
     gps.position(51.0);
     await vi.advanceTimersByTimeAsync(0);
-
     expect(lastState()).toEqual({ mode: "sharing", lastSentAt: null });
+
+    reply = async () => ({ status: "sent" });
+    await vi.advanceTimersByTimeAsync(INTERVAL);
+    expect(sent.map((fix) => fix.lat)).toEqual([51.0, 51.0]);
+    expect(lastState()).toEqual({ mode: "sharing", lastSentAt: Date.now() });
+
+    reply = async () => ({ status: "throttled" });
+    gps.position(51.1);
+    await vi.advanceTimersByTimeAsync(INTERVAL);
+    gps.position(51.2);
+    reply = async () => ({ status: "sent" });
+    await vi.advanceTimersByTimeAsync(INTERVAL);
+    expect(sent.map((fix) => fix.lat)).toEqual([51.0, 51.0, 51.1, 51.2]);
   });
 });

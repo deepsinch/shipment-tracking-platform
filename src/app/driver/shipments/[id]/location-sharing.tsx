@@ -85,7 +85,7 @@ export function LocationSharing({ shipmentId }: { shipmentId: string }) {
           onCheckedChange={onCheckedChange}
           disabled={!supported}
           aria-describedby={statusId}
-          className="mt-0.5 data-[size=default]:h-7 data-[size=default]:w-12 *:data-[slot=switch-thumb]:size-6!"
+          className="mt-0.5 data-[size=default]:h-7 data-[size=default]:w-12 *:data-[slot=switch-thumb]:size-6! data-unchecked:bg-muted-foreground/80"
         />
       </div>
       <p
