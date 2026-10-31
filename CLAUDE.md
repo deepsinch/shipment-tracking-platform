@@ -76,16 +76,16 @@ src/
 
 ## Commands (planned; NOT yet scaffolded, no package.json exists yet)
 
-| Script | Purpose |
-|---|---|
-| `pnpm dev` | Next.js dev server |
-| `pnpm build` | Production build |
-| `pnpm lint` | ESLint |
-| `pnpm typecheck` | `tsc --noEmit` |
-| `pnpm test` | Vitest unit + integration (integration uses `TEST_DATABASE_URL`) |
-| `pnpm test:e2e` | Playwright end-to-end |
-| `pnpm db:generate` | drizzle-kit generate migrations |
-| `pnpm db:migrate` | Apply migrations |
-| `pnpm db:seed` | Re-runnable demo seed ("Demo Freight Co") |
+| Script             | Purpose                                                          |
+| ------------------ | ---------------------------------------------------------------- |
+| `pnpm dev`         | Next.js dev server                                               |
+| `pnpm build`       | Production build                                                 |
+| `pnpm lint`        | ESLint                                                           |
+| `pnpm typecheck`   | `tsc --noEmit`                                                   |
+| `pnpm test`        | Vitest unit + integration (integration uses `TEST_DATABASE_URL`) |
+| `pnpm test:e2e`    | Playwright end-to-end                                            |
+| `pnpm db:generate` | drizzle-kit generate migrations                                  |
+| `pnpm db:migrate`  | Apply migrations                                                 |
+| `pnpm db:seed`     | Re-runnable demo seed ("Demo Freight Co")                        |
 
 Done criteria for every phase: lint, typecheck, test, build and test:e2e all pass.

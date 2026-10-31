@@ -8,6 +8,7 @@ learn something a newcomer would trip over. Design rationale lives in `docs/arch
 **Phase 1 (core) in progress on branch `phase-1-core`.**
 
 Done:
+
 - `docs/architecture.md` (the spec).
 - Domain modules with unit tests: `src/domain/shipment-status.ts`, `src/domain/tracking-code.ts`
   and their `*.test.ts` files. Verified only with strict `tsc` and a throwaway `node:test` shim
@@ -17,6 +18,7 @@ Done:
 Blocked: npm registry access (see Known issues). Nothing below can start until it works.
 
 Next (remaining Phase 1 scope, from the original brief):
+
 - [ ] Scaffold Next.js with `pnpm create next-app@latest` (TypeScript, App Router, `src/`, Tailwind, ESLint)
       into a temp dir, then move the files in, keeping `.gitignore` entries, README and docs.
 - [ ] Tooling: TypeScript strict, ESLint, Prettier, scripts (`dev`, `build`, `lint`, `typecheck`, `test`,

@@ -6,12 +6,12 @@ It is updated at the end of every phase.
 
 ## Users
 
-| Role | Surface | Can do |
-|---|---|---|
-| Admin | `/dashboard` | Everything a dispatcher can, plus manage members and org settings |
-| Dispatcher | `/dashboard` | Create shipments, assign drivers, change status, view all org shipments |
-| Driver | `/driver` (Phase 2) | See assigned shipments, update status, share location, capture proof of delivery |
-| Customer | `/track/[code]` | Public, no login. See status timeline and ETA for one shipment |
+| Role       | Surface             | Can do                                                                           |
+| ---------- | ------------------- | -------------------------------------------------------------------------------- |
+| Admin      | `/dashboard`        | Everything a dispatcher can, plus manage members and org settings                |
+| Dispatcher | `/dashboard`        | Create shipments, assign drivers, change status, view all org shipments          |
+| Driver     | `/driver` (Phase 2) | See assigned shipments, update status, share location, capture proof of delivery |
+| Customer   | `/track/[code]`     | Public, no login. See status timeline and ETA for one shipment                   |
 
 ## Stack
 
@@ -59,14 +59,14 @@ created ──> picked_up ──> in_transit ──> out_for_delivery ──> de
 cancelled <────────────┘
 ```
 
-| From | Allowed next |
-|---|---|
-| created | picked_up, exception, cancelled |
-| picked_up | in_transit, exception |
-| in_transit | out_for_delivery, exception |
-| out_for_delivery | delivered, exception |
-| exception | in_transit, out_for_delivery, cancelled |
-| delivered, cancelled | none (terminal) |
+| From                 | Allowed next                            |
+| -------------------- | --------------------------------------- |
+| created              | picked_up, exception, cancelled         |
+| picked_up            | in_transit, exception                   |
+| in_transit           | out_for_delivery, exception             |
+| out_for_delivery     | delivered, exception                    |
+| exception            | in_transit, out_for_delivery, cancelled |
+| delivered, cancelled | none (terminal)                         |
 
 ### Event history (append-only)
 
@@ -102,10 +102,10 @@ people who hold the code.
 
 ## Decisions log
 
-| # | Decision | Why | Alternatives considered |
-|---|---|---|---|
-| 1 | Append-only events + status projection | Audit trail and customer timeline from one source of truth | Status column only (loses history) |
-| 2 | Optimistic concurrency via version column | No locks held across user think-time, conflicts are explicit | `SELECT ... FOR UPDATE` (fine inside one request, but does not catch stale forms) |
-| 3 | State machine in pure TS | Unit testable, shared by UI (only show allowed buttons) and server (enforce) | DB check constraints (cannot express transitions cleanly) |
-| 4 | Org from session, never from input | Prevents cross-tenant access by construction | Passing org id in URLs |
-| 5 | Better Auth with organization plugin | Orgs, members and roles out of the box, Drizzle adapter | Auth.js (no built-in orgs), Clerk (hosted, vendor lock-in) |
+| #   | Decision                                  | Why                                                                          | Alternatives considered                                                           |
+| --- | ----------------------------------------- | ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| 1   | Append-only events + status projection    | Audit trail and customer timeline from one source of truth                   | Status column only (loses history)                                                |
+| 2   | Optimistic concurrency via version column | No locks held across user think-time, conflicts are explicit                 | `SELECT ... FOR UPDATE` (fine inside one request, but does not catch stale forms) |
+| 3   | State machine in pure TS                  | Unit testable, shared by UI (only show allowed buttons) and server (enforce) | DB check constraints (cannot express transitions cleanly)                         |
+| 4   | Org from session, never from input        | Prevents cross-tenant access by construction                                 | Passing org id in URLs                                                            |
+| 5   | Better Auth with organization plugin      | Orgs, members and roles out of the box, Drizzle adapter                      | Auth.js (no built-in orgs), Clerk (hosted, vendor lock-in)                        |
