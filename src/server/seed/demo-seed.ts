@@ -3,11 +3,13 @@ import "server-only";
 import { eq } from "drizzle-orm";
 
 import type { Role } from "@/domain/roles";
+import { measureRoute, pointAlong } from "@/lib/route-geometry";
 import type { AuthContext } from "@/server/auth/auth-context";
 import { getAuth } from "@/server/auth/auth";
 import { signUpWithOrganization } from "@/server/auth/sign-up";
 import { getDb } from "@/server/db/client";
 import { user } from "@/server/db/schema";
+import { routeBetween } from "@/server/routes/road-routes";
 import { changeShipmentStatus } from "@/server/services/change-shipment-status";
 import { createShipment } from "@/server/services/create-shipment";
 import { recordLocationPing } from "@/server/services/record-location-ping";
@@ -19,8 +21,8 @@ import { draftDemoShipments, type DraftShipment } from "./demo-data";
  * status. Everything goes through the real code paths: users through Better Auth (hashed
  * passwords), shipments through `createShipment` and history through `changeShipmentStatus`, so
  * every timeline obeys the state machine, the role rules and the event-time ordering. The demo
- * driver's unfinished shipments get a last known position through `recordLocationPing`, so the
- * live map has something to show before any simulator runs.
+ * driver's unfinished shipments get a last known position on their road route through
+ * `recordLocationPing`, so the live map has something to show before the simulator runs.
  *
  * Re-running is a no-op once the demo admin exists: history cannot be deleted, so the seed never
  * tries to "refresh" rows. `pnpm db:seed --reset` wipes the local dev database first instead.
@@ -155,12 +157,15 @@ async function seedPosition(
 ): Promise<void> {
   if (!lastPing) return;
   const { progress, at: recordedAt } = lastPing;
+  // On the road the truck takes (the simulator carries on from here), not the straight line.
+  const route = measureRoute(routeBetween(origin, destination).line);
+  const { lat, lng } = pointAlong(route, route.lengthM * progress);
   const result = await recordLocationPing(
     driver,
     {
       shipmentId,
-      lat: round(origin.lat + (destination.lat - origin.lat) * progress),
-      lng: round(origin.lng + (destination.lng - origin.lng) * progress),
+      lat: round(lat),
+      lng: round(lng),
       accuracyM: 12,
       recordedAt,
     },
