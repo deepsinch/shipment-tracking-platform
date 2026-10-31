@@ -185,6 +185,15 @@ drizzle-orm 0.45.4, drizzle-kit 0.31.11, pg 8.23, zod 4.6.7, @playwright/test 1.
   failure the user is deleted again (compensation), but a crash between the two would leave an
   org-less user, who can sign in but gets redirected away from `/dashboard`.
 - Only one organization per user is supported in the UI (no org switcher).
+- **No rate limiting on sign-in/sign-up (security, fix by Phase 4).** The Server Actions call
+  `auth.api.*` directly, and Better Auth's built-in rate limiter only applies to requests through its
+  HTTP handler (`/api/auth/*`), not to server-side API calls. Sign-in is therefore open to password
+  guessing. Fix: a per-IP + per-email limiter in the actions (or route sign-in through the handler),
+  with an integration test.
+- Sign-up says when an email is already registered (account enumeration). Accepted for now as a
+  product choice; revisit with email verification in Phase 3 ("check your email" response).
+- An org-less user (see sign-up above) is sent to `/sign-in` while still signed in, which is
+  confusing. A dedicated "no organization" page would be clearer.
 
 ## Environment notes
 
