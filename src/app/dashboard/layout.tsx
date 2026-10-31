@@ -39,6 +39,9 @@ async function AuthenticatedShell({ children }: { children: React.ReactNode }) {
             <Button asChild variant="ghost">
               <Link href="/dashboard/shipments">Shipments</Link>
             </Button>
+            <Button asChild variant="ghost">
+              <Link href="/dashboard/map">Live map</Link>
+            </Button>
           </nav>
           <span className="hidden text-muted-foreground md:inline">
             {user?.name} · {ROLE_LABELS[context.role]}

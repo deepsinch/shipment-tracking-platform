@@ -25,10 +25,18 @@ const DEBOUNCE_MS = 300;
  * - Bursts are collected into one refresh, and a refresh waits while a guarded form has unsaved
  *   input (see `createRefreshScheduler` and `UNSAVED_GUARD_ATTRIBUTE`), with a notice offering
  *   the latest data.
+ * - `alsoOn` adds events of the caller's choosing (the live map refreshes for the first position
+ *   of a shipment it does not know yet).
  * - Next hides, rather than unmounts, a page you navigate away from. While hidden it does not
  *   listen, so it refreshes when it is shown again.
  */
-export function LiveRefresh({ shipmentId }: { shipmentId?: string }) {
+export function LiveRefresh({
+  shipmentId,
+  alsoOn,
+}: {
+  shipmentId?: string;
+  alsoOn?: (event: RealtimeClientEvent) => boolean;
+}) {
   const router = useRouter();
   const [deferred, setDeferred] = useState(false);
   const schedulerRef = useRef<RefreshScheduler | null>(null);
@@ -64,7 +72,8 @@ export function LiveRefresh({ shipmentId }: { shipmentId?: string }) {
   useRealtime((event: RealtimeClientEvent) => {
     const relevant =
       event.kind === "resync" ||
-      (event.kind === "shipment_changed" && (!shipmentId || event.shipmentId === shipmentId));
+      (event.kind === "shipment_changed" && (!shipmentId || event.shipmentId === shipmentId)) ||
+      alsoOn?.(event) === true;
     if (relevant) schedulerRef.current?.request();
   });
 

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { LiveRefresh } from "@/components/realtime/live-refresh";
+import { ShipmentsViewNav } from "@/components/shipments-view-nav";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -69,14 +70,17 @@ export default async function ShipmentsPage({ searchParams }: PageProps<"/dashbo
               : "All shipments in your company."}
           </p>
         </div>
-        {canCreate && (
-          <Button asChild>
-            <Link href="/dashboard/shipments/new">
-              <PlusIcon aria-hidden="true" />
-              New shipment
-            </Link>
-          </Button>
-        )}
+        <div className="flex flex-wrap items-center gap-3">
+          <ShipmentsViewNav current="list" />
+          {canCreate && (
+            <Button asChild>
+              <Link href="/dashboard/shipments/new">
+                <PlusIcon aria-hidden="true" />
+                New shipment
+              </Link>
+            </Button>
+          )}
+        </div>
       </div>
 
       <FilterBar filters={filters} />
