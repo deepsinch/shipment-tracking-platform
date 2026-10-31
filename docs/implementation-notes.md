@@ -40,8 +40,8 @@ Checkpoint 5 is split in two. Done in 5a:
       `forbidden` and field errors; `loading.tsx`; `notFound()` for not_found.
 - [ ] `/track/[code]`: `getPublicTracking`, `generateMetadata`, `robots: { index: false }`,
       friendly not-found, `loading.tsx`.
-- [ ] Playwright: `playwright.config.ts` with `launchOptions.executablePath:
-    "/opt/pw-browsers/chromium"`, `test:e2e` script that builds and starts the app against a
+- [ ] Playwright: `playwright.config.ts` using the preinstalled chromium
+      (`executablePath: "/opt/pw-browsers/chromium"`), `test:e2e` script that builds and starts the app against a
       dedicated e2e database (e.g. `waybill_e2e`, migrated in global setup), one happy path
       (sign up, create, advance status, public page shows the timeline).
 
