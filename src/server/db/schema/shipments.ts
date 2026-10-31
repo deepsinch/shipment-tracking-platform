@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  bigserial,
   check,
   doublePrecision,
   foreignKey,
@@ -167,3 +168,86 @@ export type Shipment = typeof shipments.$inferSelect;
 export type NewShipment = typeof shipments.$inferInsert;
 export type ShipmentEvent = typeof shipmentEvents.$inferSelect;
 export type NewShipmentEvent = typeof shipmentEvents.$inferInsert;
+
+/**
+ * Location telemetry from the driver app: one row per accepted ping. Not history in the
+ * `shipment_events` sense (see docs/architecture.md, "Location telemetry is not history"):
+ * pings are throttled, never shown publicly and pruned after 30 days, so DELETE is allowed. A
+ * trigger (migration 0005) still rejects UPDATE: a recorded fix is never corrected.
+ *
+ * `recorded_at` is the device's time of the fix; `received_at` is when the server stored it.
+ */
+export const locationPings = pgTable(
+  "location_pings",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "restrict" }),
+    /** FK is composite with organization_id, see the table constraints below. */
+    shipmentId: uuid("shipment_id").notNull(),
+    driverId: text("driver_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "restrict" }),
+    lat: doublePrecision("lat").notNull(),
+    lng: doublePrecision("lng").notNull(),
+    /** Radius of the device's 95% confidence circle, in metres. */
+    accuracyM: doublePrecision("accuracy_m").notNull(),
+    recordedAt: timestamptz("recorded_at").notNull(),
+    receivedAt: timestamptz("received_at").notNull().defaultNow(),
+  },
+  (table) => [
+    // A shipment's track, newest first.
+    index("location_pings_shipment_recorded_at_idx").on(table.shipmentId, table.recordedAt.desc()),
+    foreignKey({
+      name: "location_pings_shipment_org_fk",
+      columns: [table.shipmentId, table.organizationId],
+      foreignColumns: [shipments.id, shipments.organizationId],
+    }).onDelete("restrict"),
+    check("location_pings_lat_range", sql`${table.lat} BETWEEN -90 AND 90`),
+    check("location_pings_lng_range", sql`${table.lng} BETWEEN -180 AND 180`),
+    check("location_pings_accuracy_non_negative", sql`${table.accuracyM} >= 0`),
+  ],
+);
+
+/**
+ * The latest known position of each shipment, upserted in the same transaction as each accepted
+ * ping. Maps read one row per shipment from here instead of searching the pings. It lives apart
+ * from `shipments` so telemetry never touches `shipments.version` (status concurrency).
+ *
+ * `updated_at` is the server time of the last accepted ping, and the single source of truth for
+ * the 10-second throttle (see `recordLocationPing`). It moves with every accepted ping, even a
+ * late one whose older `recorded_at` leaves the position where it is.
+ */
+export const shipmentPositions = pgTable(
+  "shipment_positions",
+  {
+    shipmentId: uuid("shipment_id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "restrict" }),
+    lat: doublePrecision("lat").notNull(),
+    lng: doublePrecision("lng").notNull(),
+    accuracyM: doublePrecision("accuracy_m").notNull(),
+    /** Device time of the fix this position comes from. */
+    recordedAt: timestamptz("recorded_at").notNull(),
+    /** The driver who reported this position. */
+    driverId: text("driver_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "restrict" }),
+    updatedAt: timestamptz("updated_at").notNull(),
+  },
+  (table) => [
+    foreignKey({
+      name: "shipment_positions_shipment_org_fk",
+      columns: [table.shipmentId, table.organizationId],
+      foreignColumns: [shipments.id, shipments.organizationId],
+    }).onDelete("restrict"),
+    check("shipment_positions_lat_range", sql`${table.lat} BETWEEN -90 AND 90`),
+    check("shipment_positions_lng_range", sql`${table.lng} BETWEEN -180 AND 180`),
+    check("shipment_positions_accuracy_non_negative", sql`${table.accuracyM} >= 0`),
+  ],
+);
+
+export type LocationPing = typeof locationPings.$inferSelect;
+export type ShipmentPosition = typeof shipmentPositions.$inferSelect;

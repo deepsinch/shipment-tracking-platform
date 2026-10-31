@@ -36,6 +36,13 @@
       "when": 1793467674242,
       "tag": "0004_driver_assigned_event",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1793469338365,
+      "tag": "0005_location_pings",
+      "breakpoints": true
     }
   ]
 }
