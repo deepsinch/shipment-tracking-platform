@@ -692,7 +692,9 @@ Adding the key in Vercel turns a feature on with no code change.
   SHA-256 in the unique `key_hash` index, revoked keys excluded. No constant-time comparison is
   needed: the stored secret is never compared with the presented one, the database matches
   hashes, and an attacker cannot steer a SHA-256 output. The context acts as the key's creator
-  (`createdBy`) with role `api`. `last_used_at` is written at most once a minute (a read-side
+  (`createdBy`) with role `api`, and only while that creator is still an admin member of the key's
+  organization (the same query joins `member`), so removing or demoting an admin switches their
+  keys off at the next request. `last_used_at` is written at most once a minute (a read-side
   check plus a conditional UPDATE).
 - **HTTP edge** (`src/server/api/`): `apiRoute(scope, handler)` runs, in order, key lookup (401,
   failures counted per client IP, 429 when exceeded), per-key limit (120 per minute, 429), scope

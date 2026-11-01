@@ -16,7 +16,7 @@ import {
 import { API_ROLE } from "@/domain/roles";
 import type { AuthContext } from "@/server/auth/auth-context";
 import { getDb } from "@/server/db/client";
-import { apiKeys, user } from "@/server/db/schema";
+import { apiKeys, member, user } from "@/server/db/schema";
 
 import {
   forbidden,
@@ -174,6 +174,8 @@ export const LAST_USED_GRANULARITY_MS = 60_000;
  * turned back into keys (and a slow password hash would add nothing for 256-bit random input).
  *
  * The AuthContext acts as the admin who created the key (`userId`), with the synthetic `api` role.
+ * A key whose creator is no longer an admin member of the key's organization is rejected like an
+ * unknown one (the same 401).
  *
  * `last_used_at` is written at most once per `LAST_USED_GRANULARITY_MS`: the common request only
  * reads. The conditional UPDATE keeps it to one write even when requests race.
@@ -194,6 +196,17 @@ export async function authenticateApiKey(
       lastUsedAt: apiKeys.lastUsedAt,
     })
     .from(apiKeys)
+    // The key acts as its creator, so it works only while the creator is still an admin of the
+    // key's organization: removing or demoting them switches their keys off at the next request,
+    // with no revocation step to forget. (The rows stay: a restored admin gets the keys back.)
+    .innerJoin(
+      member,
+      and(
+        eq(member.userId, apiKeys.createdBy),
+        eq(member.organizationId, apiKeys.organizationId),
+        eq(member.role, "admin"),
+      ),
+    )
     .where(and(eq(apiKeys.keyHash, hashApiKey(bearer)), isNull(apiKeys.revokedAt)))
     .limit(1);
   if (!key) return null;

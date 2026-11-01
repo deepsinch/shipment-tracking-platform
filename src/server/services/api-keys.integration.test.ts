@@ -1,10 +1,10 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { beforeAll, describe, expect, it } from "vitest";
 
 import { API_KEY_PREFIX, looksLikeApiKey } from "@/domain/api-keys";
 import type { AuthContext } from "@/server/auth/auth-context";
 import { getDb } from "@/server/db/client";
-import { apiKeys } from "@/server/db/schema";
+import { apiKeys, member } from "@/server/db/schema";
 
 import {
   createTestContext,
@@ -225,6 +225,57 @@ describe("API keys", () => {
 
       await authenticateApiKey(secret, at(LAST_USED_GRANULARITY_MS + 1));
       expect((await rowOf(key.id)).lastUsedAt).toEqual(at(LAST_USED_GRANULARITY_MS + 1));
+    });
+
+    describe("when the creator's membership changes", () => {
+      const membershipOf = (ctx: AuthContext) =>
+        and(eq(member.userId, ctx.userId), eq(member.organizationId, ctx.organizationId));
+
+      it("rejects the key once its creator is demoted from admin, and again accepts it if restored", async () => {
+        const creator = await createTestContext(admin.organizationId, "admin");
+        const { secret } = await create(creator);
+        expect(await authenticateApiKey(secret)).not.toBeNull();
+
+        await getDb().update(member).set({ role: "dispatcher" }).where(membershipOf(creator));
+        expect(await authenticateApiKey(secret)).toBeNull();
+
+        await getDb().update(member).set({ role: "admin" }).where(membershipOf(creator));
+        expect(await authenticateApiKey(secret)).not.toBeNull();
+      });
+
+      it("rejects the key once its creator is removed from the organization", async () => {
+        const creator = await createTestContext(admin.organizationId, "admin");
+        const { secret } = await create(creator);
+
+        await getDb().delete(member).where(membershipOf(creator));
+
+        expect(await authenticateApiKey(secret)).toBeNull();
+      });
+
+      it("rejects the key when the creator is an admin only of another organization", async () => {
+        const creator = await createTestContext(admin.organizationId, "admin");
+        const { secret } = await create(creator);
+        await getDb().delete(member).where(membershipOf(creator));
+        await getDb().insert(member).values({
+          id: crypto.randomUUID(),
+          organizationId: outsider.organizationId,
+          userId: creator.userId,
+          role: "admin",
+          createdAt: new Date(),
+        });
+
+        expect(await authenticateApiKey(secret)).toBeNull();
+      });
+
+      it("does not stamp last_used_at for a rejected key", async () => {
+        const creator = await createTestContext(admin.organizationId, "admin");
+        const { key, secret } = await create(creator);
+        await getDb().delete(member).where(membershipOf(creator));
+
+        await authenticateApiKey(secret);
+
+        expect((await rowOf(key.id)).lastUsedAt).toBeNull();
+      });
     });
 
     it("does not stamp a key that was revoked after the lookup", async () => {
