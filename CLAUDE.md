@@ -49,7 +49,8 @@ src/
 - Maps (MapLibre) are client-only and supplementary: every map has a text equivalent that keyboard
   and screen-reader users can use, and the public page never shows a map or coordinates.
 - E2E specs (never run with `E2E_MAP_TILES=live` in CI) import `test` from `tests/e2e/fixtures.ts` (map tiles blocked, no network dependency);
-  contexts a spec creates itself call `blockMapTiles`.
+  contexts a spec creates itself call `blockMapTiles`. Next keeps a hidden copy of the previous page after
+  navigation or reload, so locate repeated test ids with `:visible` (strict mode otherwise sees two).
 - Anything with history (users, organizations, shipments) is deactivated, never hard-deleted: foreign keys
   to history are `restrict`.
 - Migrations run during deploy while the previous release may still serve traffic, so every
@@ -67,6 +68,16 @@ src/
   setup may read their own).
 - Any new external origin (API, CDN, tiles) is added to `src/lib/security-headers.ts`; the CSP e2e
   spec fails on violations. `dangerouslySetInnerHTML` is banned by lint (part of the CSP tradeoff).
+- Public API: route files under `src/app/api/v1` export handlers only, built with `apiRoute(scope, ...)`;
+  shared API code lives in `src/server/api/`. Errors are problem+json from service result kinds; the
+  OpenAPI document is tied to routes and projections by tests. API tests give each call a random
+  `x-forwarded-for` so per-IP limits do not leak between tests.
+- Outbound integrations (webhooks, later email) are enqueued in the outbox inside the change's own
+  transaction and delivered outside any transaction. Every outbound HTTP request to a user-supplied
+  URL goes through the webhook destination guard (resolve, vet every address, pin the connection).
+- Client bundles must not import Zod: Zod 4 probes `new Function` at load, which the CSP reports as a
+  violation. Shared constants and types for client components live in schema-free modules
+  (e.g. `src/domain/signature.ts`); schemas stay server-side.
 - Importing a module must not require environment variables (e.g. the DB pool is created lazily), so
   `next build` works without a database.
 

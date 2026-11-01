@@ -11,6 +11,7 @@ import { shipmentEvents, shipments, type Shipment } from "@/server/db/schema";
 
 import { isDriverInOrganization, NOT_AN_ORGANIZATION_DRIVER } from "./driver-membership";
 import { announceShipmentChange } from "./realtime-signals";
+import { enqueueShipmentCreated } from "./webhook-outbox";
 import { forbidden, validationFailure, type Forbidden, type ValidationFailure } from "./results";
 import { blankToUndefined, optionalCoordinate, optionalText } from "./validation";
 
@@ -121,6 +122,7 @@ export async function createShipment(
       actorUserId: ctx.userId,
     });
     await announceShipmentChange(tx, created, "created");
+    await enqueueShipmentCreated(tx, created);
     return created;
   });
 

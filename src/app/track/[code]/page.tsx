@@ -159,7 +159,14 @@ function StatusCard({
             {deliveredAt ? (
               <>
                 <dt className="text-muted-foreground">Delivered</dt>
-                <dd>{formatDateTime(deliveredAt)}</dd>
+                <dd>
+                  {formatDateTime(deliveredAt)}
+                  {tracking.signedBy && (
+                    <span className="block text-muted-foreground" data-testid="signed-by">
+                      Signed by {tracking.signedBy}
+                    </span>
+                  )}
+                </dd>
               </>
             ) : (
               <>

@@ -10,6 +10,7 @@ import { getAuth } from "@/server/auth/auth";
 import { signUpWithOrganization } from "@/server/auth/sign-up";
 import { getDb } from "@/server/db/client";
 import { user } from "@/server/db/schema";
+import { sampleProof } from "@/server/demo/sample-proof";
 import { routeBetween } from "@/server/routes/road-routes";
 import { changeShipmentStatus } from "@/server/services/change-shipment-status";
 import { createShipment } from "@/server/services/create-shipment";
@@ -123,15 +124,25 @@ async function seedShipment(
     // Drivers record their own shipments' progress; cancelling is always the office's call.
     const actor = assigned && toStatus !== "cancelled" ? contexts.driver : contexts.dispatcher;
 
-    const result = await changeShipmentStatus(actor, {
-      shipmentId: created.shipment.id,
-      expectedVersion: version,
-      toStatus,
-      occurredAt,
-      publicNote,
-      internalNote,
-      location: { city: place.city, lat: place.lat, lng: place.lng },
-    });
+    // A driver's delivery comes with proof (the demo's samples); the office's does not.
+    const proof =
+      toStatus === "delivered" && actor === contexts.driver
+        ? sampleProof(draft.recipientName, index)
+        : undefined;
+
+    const result = await changeShipmentStatus(
+      actor,
+      {
+        shipmentId: created.shipment.id,
+        expectedVersion: version,
+        toStatus,
+        occurredAt,
+        publicNote,
+        internalNote,
+        location: { city: place.city, lat: place.lat, lng: place.lng },
+      },
+      { proof },
+    );
     if (!result.ok) {
       throw new Error(`Seed shipment ${index} -> ${toStatus} rejected: ${JSON.stringify(result)}`);
     }

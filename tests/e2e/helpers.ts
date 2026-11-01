@@ -109,13 +109,18 @@ export async function readPosition(
 }
 
 /** Books a shipment from the list page and returns its tracking code (on its detail page). */
-export async function createShipment(page: Page): Promise<string> {
+export async function createShipment(
+  page: Page,
+  options: { recipientEmail?: string } = {},
+): Promise<string> {
   await page.getByRole("link", { name: "New shipment" }).click();
   await expect(page.getByRole("heading", { name: "New shipment", level: 1 })).toBeVisible();
 
   const recipient = page.getByRole("group", { name: "Recipient" });
   await recipient.getByLabel("Name", { exact: true }).fill("Grace Recipient");
   await recipient.getByLabel("Reference (optional)").fill("PO-1001");
+  if (options.recipientEmail)
+    await recipient.getByLabel("Email (optional)").fill(options.recipientEmail);
 
   const pickup = page.getByRole("group", { name: "Pickup" });
   await pickup.getByLabel("Pickup address").fill("Wilhelminakade 1");
@@ -133,6 +138,20 @@ export async function createShipment(page: Page): Promise<string> {
   const heading = page.getByRole("heading", { level: 1, name: /^WB-[0-9A-Z]{4}-[0-9A-Z]{4}$/ });
   await expect(heading).toBeVisible();
   return (await heading.textContent())!.trim();
+}
+
+/**
+ * Delivers from the driver app: opens the delivery sheet, types the recipient's printed name and
+ * confirms (no signature, no photo: the printed name is the proof). The caller checks the result.
+ */
+export async function deliverFromDriverApp(
+  phone: Page,
+  recipientName = "Grace Recipient",
+): Promise<void> {
+  await phone.getByRole("button", { name: "Mark as delivered" }).click();
+  const sheet = phone.getByRole("dialog", { name: /^Deliver WB-/ });
+  await sheet.getByLabel("Recipient's printed name").fill(recipientName);
+  await sheet.getByRole("button", { name: "Confirm delivery" }).click();
 }
 
 /** Submits the status form on a shipment's detail page. */

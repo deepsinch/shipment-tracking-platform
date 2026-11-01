@@ -85,6 +85,12 @@ export default defineConfig({
         DATABASE_DIRECT_URL: databaseUrl,
         BETTER_AUTH_URL: baseURL,
         DEMO_MODE: "false",
+        // The webhook spec runs a receiver on 127.0.0.1; without this flag the SSRF guard (rightly)
+        // refuses it. Never set outside tests and development (the env check refuses it on Vercel).
+        WEBHOOKS_ALLOW_LOCAL_TARGETS: "true",
+        // AI intake answers from recorded fixtures (src/server/intake/fixtures.ts), never the live
+        // API. env.ts refuses this flag on Vercel and in demo mode, so only this server has it.
+        INTAKE_USE_FAKE_MODEL: "true",
       },
     },
     {

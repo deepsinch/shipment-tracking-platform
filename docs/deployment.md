@@ -38,7 +38,10 @@ Tick these off as you go. Each item is explained in the numbered steps below.
   version keeps serving.
 - A daily cron job (03:00 UTC) wipes and recreates the demo data, so the demo never fills up with
   strangers' test data. A second daily job (04:00 UTC, `/api/cron/purge`, same `CRON_SECRET`) deletes
-  location pings older than 30 days and expired rate-limit rows; it also runs with demo mode off.
+  location pings older than 30 days and expired rate-limit rows, and drains any webhook deliveries
+  that are due (the backstop for retries that no app or API activity picked up); it also runs with
+  demo mode off. Webhooks add no cron entry and no environment variable: `WEBHOOKS_ALLOW_LOCAL_TARGETS`
+  is for development and tests only, and the app refuses to start with it on Vercel.
 - While someone has the live map or a shipment page open, the browser asks the server to move the
   demo trucks one step every ~12 seconds. Nothing runs when nobody is looking. When fewer than 6
   shipments are left to drive, the same tick books up to 2 new ones as the demo dispatcher, so the
@@ -183,6 +186,89 @@ The README's "Live demo" link already points at the production URL; change it if
 2. Add one more environment variable, `BETTER_AUTH_URL`, set to the domain with `https://`, e.g.
    `https://waybill.example.com` (Production only), and **Redeploy**. The app still accepts
    requests on the `*.vercel.app` addresses too.
+
+## Turning on real customer emails (optional)
+
+Out of the box, and always in demo mode, customer emails are **not sent**: each one is stored and
+shown to admins under **Emails** in the dashboard, exactly as it would have been sent. To send them
+for real (on a deployment that is not in demo mode), use Resend:
+
+1. Create a Resend account and an **API key** (Resend dashboard, API Keys). Switch on "Sensitive" when
+   you add it in Vercel.
+2. Choose a sender. To try it, Resend's shared test sender `onboarding@resend.dev` works, but Resend
+   only delivers from it to the address of your own Resend account. For real customers, add and verify
+   your own domain in Resend (it asks for DNS records) and send from an address on it.
+3. In Vercel add two environment variables (Production, and Preview if you want it there):
+
+   | Key              | Value                                                                             |
+   | ---------------- | --------------------------------------------------------------------------------- |
+   | `RESEND_API_KEY` | the Resend API key (starts with `re_`)                                            |
+   | `EMAIL_FROM`     | `Waybill <notifications@your-domain>` (or `Name <onboarding@resend.dev>` to test) |
+
+4. Redeploy. No code change is needed; setting only one of the two is a startup error that names the
+   missing one. With `DEMO_MODE=true` both are ignored on purpose.
+
+Emails use the app's own address for the tracking and unsubscribe links (the same address Better Auth
+uses, see "Custom domain"). Failed sends are retried like webhooks (1 minute to 6 hours), and each
+message carries an idempotency key, so a retry never sends a duplicate. The unsubscribe links are
+signed with a key derived from `BETTER_AUTH_SECRET`: rotating that secret invalidates links in
+emails already sent.
+
+## Turning on delivery photos (optional)
+
+Drivers can add a photo when they deliver. It needs a **Vercel Blob** store; without one the driver
+app simply does not offer photos (the printed name and the signature still work), and demo mode
+never offers them whatever is configured.
+
+1. In the Vercel project open **Storage** (or the Marketplace), create a **Blob** store and connect
+   it to the project. When asked for access, choose **Private**: Waybill stores every photo with
+   private access and shows it to staff through the app, never through a public link.
+2. Connecting the store adds `BLOB_READ_WRITE_TOKEN` to the project's environment variables
+   (Production and, if you choose, Preview). Nothing else to set.
+3. Redeploy. The delivery sheet now shows "Take a photo".
+
+Photos are shrunk in the browser (1600 px JPEG), at most 4 MB on the server (Vercel's request limit
+is 4.5 MB), with location metadata removed before storage. They are kept until you delete them in
+the Blob store: there is no retention job yet. A photo of a delivery that failed to save is deleted
+again; a crash in that moment can leave one unreferenced private file.
+
+Not verified against the real service from the build environment (vercel.com is unreachable there):
+the adapter follows `@vercel/blob` 2.8's `put`, `get` and `del` with `access: "private"`. Check one
+real delivery with a photo after enabling it.
+
+## Turning on AI intake (optional)
+
+"Paste a request email" on the new-shipment page needs an **Anthropic API key**. Without one the
+panel is not shown anywhere; nothing else changes.
+
+1. In the [Anthropic Console](https://console.anthropic.com) create an API key (a dedicated one for
+   this project), and **set a spending limit** for the workspace or organization there. The app's
+   own caps (below) bound the number of requests, but the limit in the console is the one that
+   bounds the bill.
+2. In Vercel add `ANTHROPIC_API_KEY` (Production, and Preview if you want it there; mark it
+   "Sensitive"). Optionally `INTAKE_MODEL` to use another model id than the default,
+   `claude-haiku-5-5`.
+3. Redeploy. The panel appears for admins and dispatchers.
+
+What it costs and how it is limited: each paste is one request to the model, with a hard cap of
+1,500 output tokens and an input cap of 20 KB. The app counts requests in Postgres: **50 per company
+per day**, and in demo mode **200 per day for the whole demo** (strangers share one company and one
+bill). A request is counted when it is made, whether it succeeds or not. When the cap is used up the
+panel says so and the form still works by hand. The window is 24 hours from the first request, not
+a calendar day. A short email costs a fraction of a cent on a small model; check the current price
+on Anthropic's pricing page and your own usage in the console.
+
+Privacy: the pasted text is sent to Anthropic's API and is not stored by Waybill (it is not logged
+and not kept in the database). It is untrusted input: the model has no tools and can only return
+the fields of the form, which are checked again on the server and then by the person who books.
+
+Evaluating the prompt or the model (never part of CI, it calls the live API): with the key in `.env`,
+`pnpm intake:eval` sends the committed example emails and prints how many form fields come back
+exactly right, per field. Run it after changing the prompt, the schema or `INTAKE_MODEL`.
+
+Not verified against the live API from the build environment: the adapter follows
+`@anthropic-ai/sdk` 1.3 (`messages.create` with `output_config.format`). After enabling it, run
+`pnpm intake:eval` once and paste a real email.
 
 ## Turning demo mode off
 

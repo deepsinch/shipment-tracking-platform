@@ -2,12 +2,16 @@ import "server-only";
 
 import { z } from "zod";
 
+import { photoCaptureAvailable } from "@/domain/delivery-proof";
+import { selectEmailTransport } from "@/domain/email";
+import { intakeAvailable } from "@/domain/intake";
+
 import { resolveAuthUrls, type AuthUrlSource } from "./auth/base-url";
 
 /**
  * Runtime environment for the app, validated with Zod.
  *
- * Validation is lazy: each group (database, auth, realtime, demo) is parsed the first time code
+ * Validation is lazy: each group (database, auth, realtime, demo, webhooks, email, photos, intake) is parsed the first time code
  * reads it, and cached. Importing this module never throws, so `next build` and modules that are
  * only imported (never run) work without any environment variables. A missing or malformed
  * variable fails the first request that needs it, with a message naming the variable (never its
@@ -170,11 +174,136 @@ const demoSchema = z
       .filter((name) => name !== ""),
   }));
 
+const webhooksSchema = z
+  .object({
+    WEBHOOKS_ALLOW_LOCAL_TARGETS: z.preprocess(
+      (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+      z.enum(["true", "false"], { error: 'must be "true" or "false"' }).optional(),
+    ),
+    // Read only to refuse the flag where it must never be on.
+    VERCEL: optionalString,
+    DEMO_MODE: optionalString,
+  })
+  .superRefine((env, ctx) => {
+    if (env.WEBHOOKS_ALLOW_LOCAL_TARGETS !== "true") return;
+    if (env.VERCEL || env.DEMO_MODE === "true") {
+      ctx.addIssue({
+        code: "custom",
+        path: ["WEBHOOKS_ALLOW_LOCAL_TARGETS"],
+        message:
+          "must not be set on Vercel or in demo mode: it lets webhooks reach localhost " +
+          "(development and tests only)",
+      });
+    }
+  })
+  .transform((env) => ({
+    /**
+     * Development and tests only: lets webhook URLs point at http://localhost, so a test
+     * receiver on the same machine works. Private ranges and cloud metadata addresses stay
+     * refused. Rejected on Vercel and in demo mode (see `superRefine`), so a hosted deployment
+     * cannot be talked into reaching its own network.
+     */
+    allowLocalTargets: env.WEBHOOKS_ALLOW_LOCAL_TARGETS === "true",
+  }));
+
+const emailSchema = z
+  .object({
+    RESEND_API_KEY: optionalString,
+    EMAIL_FROM: optionalString,
+    // Read to force the preview transport in demo mode.
+    DEMO_MODE: optionalString,
+  })
+  .superRefine((env, ctx) => {
+    if (env.DEMO_MODE === "true") return;
+    if (env.RESEND_API_KEY && !env.EMAIL_FROM) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["EMAIL_FROM"],
+        message:
+          'is required when RESEND_API_KEY is set, e.g. "Waybill <notifications@your-domain>"',
+      });
+    } else if (env.EMAIL_FROM && !env.RESEND_API_KEY) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["RESEND_API_KEY"],
+        message: "is required when EMAIL_FROM is set",
+      });
+    }
+  })
+  .transform((env) => ({
+    resendApiKey: env.RESEND_API_KEY,
+    from: env.EMAIL_FROM,
+    /** `resend` only with both variables and demo mode off; otherwise messages are stored as previews. */
+    transport: selectEmailTransport({
+      demoMode: env.DEMO_MODE === "true",
+      resendApiKey: env.RESEND_API_KEY,
+      from: env.EMAIL_FROM,
+    }),
+  }));
+
+const photosSchema = z
+  .object({
+    // Set by the Vercel Blob integration (Marketplace) when a store is connected to the project.
+    BLOB_READ_WRITE_TOKEN: optionalString,
+    // Read to switch photo capture off in demo mode.
+    DEMO_MODE: optionalString,
+  })
+  .transform((env) => ({
+    blobToken: env.BLOB_READ_WRITE_TOKEN,
+    /** Photo capture exists only with a token and never in demo mode (no visitor files are kept). */
+    enabled: photoCaptureAvailable({
+      demoMode: env.DEMO_MODE === "true",
+      blobToken: env.BLOB_READ_WRITE_TOKEN,
+    }),
+  }));
+
+const intakeSchema = z
+  .object({
+    // The Anthropic API key. Without it AI intake is hidden.
+    ANTHROPIC_API_KEY: optionalString,
+    // Overrides the default model id (see DEFAULT_INTAKE_MODEL).
+    INTAKE_MODEL: optionalString,
+    INTAKE_USE_FAKE_MODEL: z.preprocess(
+      (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+      z.enum(["true", "false"], { error: 'must be "true" or "false"' }).optional(),
+    ),
+    // Read only to refuse the fake where it must never be on.
+    VERCEL: optionalString,
+    DEMO_MODE: optionalString,
+  })
+  .superRefine((env, ctx) => {
+    if (env.INTAKE_USE_FAKE_MODEL !== "true") return;
+    if (env.VERCEL || env.DEMO_MODE === "true") {
+      ctx.addIssue({
+        code: "custom",
+        path: ["INTAKE_USE_FAKE_MODEL"],
+        message:
+          "must not be set on Vercel or in demo mode: it replaces the model with recorded " +
+          "answers (tests and local development only)",
+      });
+    }
+  })
+  .transform((env) => {
+    const useFake = env.INTAKE_USE_FAKE_MODEL === "true";
+    return {
+      apiKey: env.ANTHROPIC_API_KEY,
+      model: env.INTAKE_MODEL,
+      /** Tests and local runs only: recorded answers instead of the API. Refused on Vercel and in demo mode. */
+      useFake,
+      /** The feature is shown only with a key (or the test-only fake). */
+      enabled: intakeAvailable({ apiKey: env.ANTHROPIC_API_KEY, useFake }),
+    };
+  });
+
 const groups = {
   database: databaseSchema,
   auth: authSchema,
   realtime: realtimeSchema,
   demo: demoSchema,
+  webhooks: webhooksSchema,
+  email: emailSchema,
+  photos: photosSchema,
+  intake: intakeSchema,
 };
 
 type Groups = typeof groups;
@@ -213,6 +342,10 @@ export function createEnv(source: Source): ServerEnv {
     auth: { get: lazy("auth"), enumerable: true },
     realtime: { get: lazy("realtime"), enumerable: true },
     demo: { get: lazy("demo"), enumerable: true },
+    webhooks: { get: lazy("webhooks"), enumerable: true },
+    email: { get: lazy("email"), enumerable: true },
+    photos: { get: lazy("photos"), enumerable: true },
+    intake: { get: lazy("intake"), enumerable: true },
   });
 }
 

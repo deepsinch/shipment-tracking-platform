@@ -87,7 +87,7 @@ export function StatusChangeForm({ shipmentId, trackingCode, version, status, op
           <TextAreaField
             {...field("publicNote")}
             label="Note for the customer (optional)"
-            description="Shown on the public tracking page."
+            description="Shown on the public tracking page and in the customer's email."
             rows={2}
           />
           <TextAreaField

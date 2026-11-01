@@ -2,7 +2,7 @@ import type { MetadataRoute } from "next";
 
 /**
  * Only the public landing page is for search engines. The app's surfaces are disallowed: staff
- * and driver pages need a session anyway, auth pages have nothing to index, and tracking pages
+ * and driver pages need a session anyway, auth pages have nothing to index, and tracking and unsubscribe pages
  * belong to a carrier's customers (each also sends `noindex`, since robots.txt only asks crawlers
  * not to fetch a URL; it does not keep a linked URL out of an index).
  *
@@ -14,7 +14,7 @@ export default function robots(): MetadataRoute.Robots {
     rules: {
       userAgent: "*",
       allow: "/",
-      disallow: ["/dashboard", "/driver", "/track", "/api", "/sign-in", "/sign-up"],
+      disallow: ["/dashboard", "/driver", "/track", "/unsubscribe", "/api", "/sign-in", "/sign-up"],
     },
   };
 }

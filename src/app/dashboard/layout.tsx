@@ -6,8 +6,12 @@ import { RealtimeProvider } from "@/components/realtime/realtime-provider";
 import { SiteHeader } from "@/components/site-header";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { canManageApiKeys } from "@/domain/api-keys";
+import { canViewEmailPreviews } from "@/domain/email";
 import { ROLE_LABELS } from "@/domain/roles";
+import { canManageWebhooks } from "@/domain/webhooks";
 import { getCurrentUser, requireAuthContextOn } from "@/server/auth/session";
+import { drainOutboxOnActivity } from "@/server/webhooks/schedule";
 
 import { signOutAction } from "../(auth)/actions";
 
@@ -29,6 +33,8 @@ export default function DashboardLayout({ children }: LayoutProps<"/dashboard">)
 async function AuthenticatedShell({ children }: { children: React.ReactNode }) {
   const context = await requireAuthContextOn("/dashboard");
   const user = await getCurrentUser();
+  // Staff opening the dashboard doubles as the heartbeat that retries due webhooks (throttled).
+  drainOutboxOnActivity();
 
   return (
     <RealtimeProvider>
@@ -42,6 +48,21 @@ async function AuthenticatedShell({ children }: { children: React.ReactNode }) {
             <Button asChild variant="ghost">
               <Link href="/dashboard/map">Live map</Link>
             </Button>
+            {canManageApiKeys(context.role) && (
+              <Button asChild variant="ghost">
+                <Link href="/dashboard/settings/api-keys">API keys</Link>
+              </Button>
+            )}
+            {canViewEmailPreviews(context.role) && (
+              <Button asChild variant="ghost">
+                <Link href="/dashboard/settings/email-previews">Emails</Link>
+              </Button>
+            )}
+            {canManageWebhooks(context.role) && (
+              <Button asChild variant="ghost">
+                <Link href="/dashboard/settings/webhooks">Webhooks</Link>
+              </Button>
+            )}
           </nav>
           <span className="hidden text-muted-foreground md:inline">
             {user?.name} · {ROLE_LABELS[context.role]}

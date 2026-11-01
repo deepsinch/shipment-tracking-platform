@@ -222,3 +222,52 @@ function distanceKm(a: { lat: number; lng: number }, b: { lat: number; lng: numb
     Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(rad(b.lng - a.lng) / 2) ** 2;
   return 2 * 6371 * Math.asin(Math.sqrt(h));
 }
+
+test("seeded deliveries show proof, with a labelled sample photo instead of any stored file", async ({
+  page,
+}) => {
+  const violations = await recordCspViolations(page.context());
+  await page.goto("/sign-in");
+  await page
+    .getByTestId("demo-sign-in")
+    .getByRole("button", { name: /Sign in as admin/ })
+    .click();
+  await expect(page).toHaveURL(/\/dashboard\/shipments$/);
+
+  // The drivers' deliveries were seeded with proof (some with a photo, some signed by name only);
+  // the dispatcher's were marked from the office and have none.
+  await page.goto("/dashboard/shipments?status=delivered");
+  const links = page.getByRole("link", { name: /^WB-/ });
+  await expect(links.first()).toBeVisible();
+  const hrefs = await links.evaluateAll((links) => links.map((link) => link.getAttribute("href")!));
+  expect(hrefs.length).toBeGreaterThan(0);
+
+  let withSamplePhoto = 0;
+  for (const href of hrefs) {
+    await page.goto(href);
+    const card = page.locator("[data-testid=proof-of-delivery]:visible");
+    await expect(card).toBeVisible();
+    if (await card.getByText("Sample photo. The public demo never stores photos.").isVisible()) {
+      withSamplePhoto += 1;
+      await expect(card.getByRole("img", { name: /sample delivery photo/ })).toBeVisible();
+    }
+  }
+  expect(withSamplePhoto).toBeGreaterThan(0);
+  expect(violations).toEqual([]);
+});
+
+test("AI intake is hidden without an API key, which is how the public demo ships", async ({
+  page,
+}) => {
+  await page.goto("/sign-in");
+  await page
+    .getByTestId("demo-sign-in")
+    .getByRole("button", { name: /Sign in as dispatcher/ })
+    .click();
+  await expect(page).toHaveURL(/\/dashboard\/shipments$/);
+  await page.getByRole("link", { name: "New shipment" }).click();
+  await expect(page.getByRole("heading", { name: "New shipment", level: 1 })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Create shipment" })).toBeVisible();
+  await expect(page.getByTestId("intake-panel")).toHaveCount(0);
+  await expect(page.getByText("Paste a request email")).toHaveCount(0);
+});

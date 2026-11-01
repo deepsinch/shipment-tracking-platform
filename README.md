@@ -50,8 +50,28 @@ nightly reset) is code in this repository, described in [docs/deployment.md](doc
 - **Truck simulator** (`pnpm simulate`): drives the demo trucks along those roads as their driver,
   through the same rules as a real phone, so the map moves, and books replacements when they run low.
 
-Next up (Phase 3): a public API, webhooks, email notifications, proof of delivery and AI intake of
-shipment requests (see the roadmap in [docs/implementation-notes.md](docs/implementation-notes.md)).
+## Features (Phase 3: integrations)
+
+- **Public API** (`/api/v1`): API keys created by admins (shown once, stored as a hash), scoped
+  read and write access to shipments, `ETag` / `If-Match` so integrations get the same lost-update
+  protection as the forms, RFC 9457 errors, per-key rate limits and an OpenAPI 3.1 document. See
+  [docs/api.md](docs/api.md).
+
+- **Webhooks:** signed, retried deliveries of shipment events to an endpoint an admin registers,
+  with a delivery log and resend, and a guard against calling private addresses.
+- **Customer emails:** status updates through Resend when configured (a stored preview otherwise),
+  with a one-click unsubscribe per company and address.
+- **Proof of delivery:** the driver app collects the recipient's printed name, an optional drawn
+  signature and an optional photo (private storage, shown to staff only); the public page says who
+  signed, nothing more.
+- **AI intake:** with an Anthropic API key, "Paste a request email" on the new-shipment page fills
+  the form as a draft from an email (in English or other European languages). A person reviews
+  every field and books it; nothing is created automatically. Daily caps keep the cost bounded,
+  and without a key the feature is simply not shown. `pnpm intake:eval` scores the model on the
+  committed fixtures (see [docs/deployment.md](docs/deployment.md)).
+
+Every integration works without its key: it degrades visibly instead of failing, and the tests
+never call a third-party service.
 
 ## Stack
 
@@ -159,6 +179,7 @@ The seed runs once (a re-run is a no-op, because history is never deleted). For 
 ## Documentation
 
 - [Deployment guide](docs/deployment.md): click-by-click Vercel + Neon setup, demo mode, troubleshooting.
+- [API guide](docs/api.md): API keys, endpoints, ETag and If-Match, error format, rate limits.
 - [Architecture](docs/architecture.md): system design, state machine, multi-tenancy, decisions log.
 - [Engineering notes](docs/engineering-notes.md): the problems worth discussing and the tradeoffs.
 - [Implementation notes](docs/implementation-notes.md): status, roadmap, gotchas, environment.

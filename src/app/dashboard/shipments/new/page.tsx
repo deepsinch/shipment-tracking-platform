@@ -5,9 +5,10 @@ import { redirect } from "next/navigation";
 
 import { canCreateShipments } from "@/domain/shipment-permissions";
 import { requireAuthContextOn } from "@/server/auth/session";
+import { env } from "@/server/env";
 import { listDrivers } from "@/server/services/list-drivers";
 
-import { NewShipmentForm } from "./new-shipment-form";
+import { NewShipmentWorkspace } from "./new-shipment-workspace";
 
 export const metadata: Metadata = { title: "New shipment" };
 
@@ -33,7 +34,10 @@ export default async function NewShipmentPage() {
           A tracking code is generated when you create it.
         </p>
       </div>
-      <NewShipmentForm drivers={drivers.ok ? drivers.drivers : []} />
+      <NewShipmentWorkspace
+        drivers={drivers.ok ? drivers.drivers : []}
+        intakeEnabled={env.intake.enabled}
+      />
     </main>
   );
 }

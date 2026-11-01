@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { ROLES } from "./roles";
+import { API_ROLE, ROLES } from "./roles";
 import { SHIPMENT_STATUSES } from "./shipment-status";
 import { canRecordLocation, isLocationSharingStatus } from "./location-sharing";
 
@@ -14,6 +14,6 @@ describe("isLocationSharingStatus", () => {
 
 describe("canRecordLocation", () => {
   it("lets only drivers record positions", () => {
-    expect(ROLES.filter(canRecordLocation)).toEqual(["driver"]);
+    expect([...ROLES, API_ROLE].filter(canRecordLocation)).toEqual(["driver"]);
   });
 });
