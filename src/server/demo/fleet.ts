@@ -17,15 +17,17 @@ import { listDrivers } from "@/server/services/list-drivers";
 
 type AdminMembership = { userId: string; organizationId: string };
 
-async function findDemoAdmin(): Promise<AdminMembership | null> {
+async function findDemoMember(email: string): Promise<AdminMembership | null> {
   const [row] = await getDb()
     .select({ userId: user.id, organizationId: member.organizationId })
     .from(user)
     .innerJoin(member, eq(member.userId, user.id))
-    .where(eq(user.email, DEMO_USERS[0].email))
+    .where(eq(user.email, email))
     .limit(1);
   return row ?? null;
 }
+
+const findDemoAdmin = () => findDemoMember(DEMO_USERS[0].email);
 
 /** The demo organization's id, or null when the demo has not been seeded. */
 export async function findDemoOrganizationId(): Promise<string | null> {
@@ -54,4 +56,19 @@ export async function resolveDemoDrivers(): Promise<AuthContext[]> {
     ),
   );
   return contexts.filter((context) => context !== null);
+}
+
+/** The demo dispatcher, whom the simulator books new shipments as. */
+export async function resolveDemoDispatcher(): Promise<AuthContext> {
+  const membership = await findDemoMember(DEMO_USERS[1].email);
+  const context =
+    membership &&
+    (await resolveAuthContext({
+      userId: membership.userId,
+      activeOrganizationId: membership.organizationId,
+    }));
+  if (!context) {
+    throw new Error(`${DEMO_USERS[1].email} is not a member of ${DEMO_ORGANIZATION_NAME}.`);
+  }
+  return context;
 }

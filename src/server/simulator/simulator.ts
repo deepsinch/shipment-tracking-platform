@@ -6,13 +6,23 @@ import type { Random } from "@/lib/random";
 import { distanceAlong, measureRoute, pointAlong, type MeasuredRoute } from "@/lib/route-geometry";
 import type { AuthContext } from "@/server/auth/auth-context";
 import type { Shipment } from "@/server/db/schema";
-import { routeBetween } from "@/server/routes/road-routes";
+import { roadRoutes, routeBetween } from "@/server/routes/road-routes";
+import { assignDriver } from "@/server/services/assign-driver";
 import { changeShipmentStatus } from "@/server/services/change-shipment-status";
+import { createShipment } from "@/server/services/create-shipment";
 import { getShipment } from "@/server/services/get-shipment";
 import { getShipmentPositions } from "@/server/services/get-shipment-positions";
 import { listAssignedShipments } from "@/server/services/list-assigned-shipments";
 import { recordLocationPing } from "@/server/services/record-location-ping";
 
+import {
+  bookablePairs,
+  DEFAULT_REFILL,
+  draftBooking,
+  planRefill,
+  type Booking,
+  type RefillConfig,
+} from "./booking";
 import {
   DEFAULT_SIMULATOR_CONFIG,
   planTick,
@@ -37,6 +47,11 @@ import {
  * Exceptions: one the driver recorded (the simulator's own, also from an earlier run, or the
  * seed's) is the driver's to clear, so the truck carries on after `exceptionTicks`. One the office
  * recorded is a hold: the simulator leaves it alone until the office moves the shipment on.
+ *
+ * Refill (optional): when a tick leaves fewer drivable shipments than `target`, the simulator
+ * books replacements as the demo dispatcher, through `createShipment` and `assignDriver`, between
+ * cities that have a committed road route, assigned to the first driver. The next tick picks them
+ * up like any assigned booking. At most `maxPerTick` per tick, so the fleet refills gradually.
  */
 
 export type SimulatorOptions = {
@@ -48,6 +63,14 @@ export type SimulatorOptions = {
   drivers: readonly AuthContext[] | (() => Promise<readonly AuthContext[]>);
   random: Random;
   config?: Partial<SimulatorConfig>;
+  /**
+   * Book new work when the fleet runs low (off when omitted). Needs the office account to book as
+   * (a function is called when a booking is due, for a caller whose accounts can change between
+   * ticks) and at least one driver to assign to.
+   */
+  refill?: Partial<RefillConfig> & {
+    dispatcher: AuthContext | (() => Promise<AuthContext>);
+  };
   /** At most this many trucks per tick (the first by tracking code). */
   maxShipments?: number;
   /** The clock for device and server times; injectable for tests. */
@@ -68,8 +91,13 @@ export type TickReport = {
   /** Trucks driven this tick. */
   driven: number;
   events: SimulatorEvent[];
-  /** Shipments still to drive after this tick (including any beyond `maxShipments`). */
+  /**
+   * Shipments still to drive after this tick (including any beyond `maxShipments`, and the ones
+   * booked by this tick's refill).
+   */
   remaining: number;
+  /** Tracking codes of the shipments this tick's refill booked. */
+  booked: string[];
 };
 
 /** What the simulator remembers about a truck between ticks. */
@@ -130,7 +158,50 @@ export function createSimulator(options: SimulatorOptions) {
       const outcome = await driveTruck(truck, now, events);
       if (outcome === "delivered") finished++;
     }
-    return { driven: selected.length, events, remaining: candidates.length - finished };
+    const stillDrivable = candidates.length - finished;
+    const booked = await refill(drivers, stillDrivable, now);
+    return {
+      driven: selected.length,
+      events,
+      remaining: stillDrivable + booked.length,
+      booked,
+    };
+  }
+
+  /**
+   * Books replacements when fewer than `target` shipments are left to drive. A refused booking
+   * (say the office account lost its role) is logged and ends the refill for this tick.
+   */
+  async function refill(
+    drivers: readonly AuthContext[],
+    drivable: number,
+    now: Date,
+  ): Promise<string[]> {
+    const refillOptions = options.refill;
+    const driver = drivers[0];
+    if (!refillOptions || !driver) return [];
+    const count = planRefill(drivable, { ...DEFAULT_REFILL, ...definedOnly(refillOptions) });
+    if (count === 0) return [];
+
+    const dispatcher =
+      typeof refillOptions.dispatcher === "function"
+        ? await refillOptions.dispatcher()
+        : refillOptions.dispatcher;
+    const pairs = bookablePairs(roadRoutes());
+    const booked: string[] = [];
+    for (let i = 0; i < count; i++) {
+      const booking = draftBooking(options.random, now, pairs);
+      const result = await book(dispatcher, driver, booking, now);
+      if (!result.ok) {
+        log(`${timeOf(now)} booking refused: ${result.reason}`);
+        break;
+      }
+      booked.push(result.trackingCode);
+      log(
+        `${timeOf(now)} ${result.trackingCode}  booked ${booking.origin.city} → ${booking.destination.city}, assigned to the driver`,
+      );
+    }
+    return booked;
   }
 
   async function driveTruck(
@@ -222,6 +293,55 @@ export function createSimulator(options: SimulatorOptions) {
 }
 
 export type Simulator = ReturnType<typeof createSimulator>;
+
+/** Books one shipment and assigns the driver, as the office would in the app. */
+async function book(
+  dispatcher: AuthContext,
+  driver: AuthContext,
+  booking: Booking,
+  now: Date,
+): Promise<{ ok: true; trackingCode: string } | { ok: false; reason: string }> {
+  const { origin, destination } = booking;
+  const created = await createShipment(
+    dispatcher,
+    {
+      reference: booking.reference,
+      recipientName: booking.recipientName,
+      originAddressLine: origin.address,
+      originCity: origin.city,
+      originPostalCode: origin.postalCode,
+      originCountry: origin.country,
+      originLat: origin.lat,
+      originLng: origin.lng,
+      destinationAddressLine: destination.address,
+      destinationCity: destination.city,
+      destinationPostalCode: destination.postalCode,
+      destinationCountry: destination.country,
+      destinationLat: destination.lat,
+      destinationLng: destination.lng,
+      weightKg: booking.weightKg,
+      serviceLevel: booking.serviceLevel,
+      promisedDeliveryAt: booking.promisedDeliveryAt,
+    },
+    { now: () => now },
+  );
+  if (!created.ok) return { ok: false, reason: created.reason };
+  const assigned = await assignDriver(dispatcher, {
+    shipmentId: created.shipment.id,
+    expectedVersion: created.shipment.version,
+    driverId: driver.userId,
+  });
+  if (!assigned.ok) return { ok: false, reason: assigned.reason };
+  return { ok: true, trackingCode: created.shipment.trackingCode };
+}
+
+/** The refill numbers the caller set, without the keys left undefined. */
+function definedOnly({ target, maxPerTick }: Partial<RefillConfig>): Partial<RefillConfig> {
+  return {
+    ...(target === undefined ? {} : { target }),
+    ...(maxPerTick === undefined ? {} : { maxPerTick }),
+  };
+}
 
 /**
  * Every driver's unfinished assigned shipments, each read in full (status, version, stops) with

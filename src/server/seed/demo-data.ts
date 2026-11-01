@@ -126,7 +126,7 @@ export const CITIES: readonly City[] = [
   },
 ];
 
-const RECIPIENTS = [
+export const RECIPIENTS = [
   "Sanne de Vries",
   "Lucas Peeters",
   "Emma Janssen",
@@ -292,7 +292,7 @@ function draftShipment(
   };
 }
 
-const PROMISE_DAYS: Record<ServiceLevel, number> = { same_day: 0, express: 1, standard: 3 };
+export const PROMISE_DAYS: Record<ServiceLevel, number> = { same_day: 0, express: 1, standard: 3 };
 
 /**
  * The unfinished shipments that are deliberately late: one in transit and one held up by an

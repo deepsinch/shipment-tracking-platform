@@ -88,7 +88,7 @@ describe("advanceDemoSimulation: the throttle around the tick", () => {
         demoOrganizationId: async () => "demo-org",
         tick: async () => {
           ticks.push(ticks.length);
-          return { driven: 3, events: [], remaining: 2 };
+          return { driven: 3, events: [], remaining: 2, booked: [] };
         },
       },
     };
