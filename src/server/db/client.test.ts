@@ -11,7 +11,7 @@ describe("getDb", () => {
   it("can be imported without DATABASE_URL and only fails when first used", async () => {
     vi.stubEnv("DATABASE_URL", "");
     const { getDb } = await import("./client");
-    expect(() => getDb()).toThrow(/DATABASE_URL is not set/);
+    expect(() => getDb()).toThrow(/DATABASE_URL is required/);
   });
 
   it("returns the same client on every call", async () => {

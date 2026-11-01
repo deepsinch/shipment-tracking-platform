@@ -8,6 +8,16 @@ It is a portfolio project, built to production standards: a strict state machine
 history enforced by the database, optimistic concurrency, multi-tenant isolation, and tests against
 a real Postgres.
 
+## Live demo
+
+**Live demo: _link coming soon_** (the owner's deployment guide is [docs/deployment.md](docs/deployment.md)).
+
+Open it and click **Try the demo** on the sign-in page: three one-click accounts (admin,
+dispatcher, driver) on a seeded company. Open the live map and the trucks move along real roads.
+The data resets every night around 03:00 UTC. It runs on Vercel and Neon; the whole deployment
+(migrations, demo data, nightly reset) is code in this repository, described in
+[docs/deployment.md](docs/deployment.md).
+
 ## Features (Phase 1)
 
 - **Accounts and companies:** sign up creates a company workspace with you as admin. Roles: admin,
@@ -35,7 +45,7 @@ a real Postgres.
 - **Road routes:** the detail page draws the real driving route for the demo's city pairs, from
   committed OpenStreetMap routing fixtures (no routing service at runtime).
 - **Truck simulator** (`pnpm simulate`): drives the demo trucks along those roads as their driver,
-  through the same rules as a real phone, so the map moves.
+  through the same rules as a real phone, so the map moves, and books replacements when they run low.
 
 Next up (Phase 3): a public API, webhooks, email notifications, proof of delivery and AI intake of
 shipment requests (see the roadmap in [docs/implementation-notes.md](docs/implementation-notes.md)).
@@ -91,7 +101,8 @@ password `demo-password` (demo only):
 3. Sign in at http://localhost:3000/sign-in as `dispatcher@demo.test` / `demo-password`.
 4. In a second terminal, run `pnpm simulate`.
 5. Open **Live map**: the trucks move every 12 seconds along real roads, go out for delivery near
-   the address and are delivered (they then leave the map). Now and then one reports an exception
+   the address and are delivered (they then leave the map, and the simulator books new shipments
+   as the demo dispatcher so at least six are always on the road). Now and then one reports an exception
    and carries on a minute later. Open a shipment to see its route and live position, or its
    public tracking page to see the customer's view.
 
@@ -99,8 +110,9 @@ The simulator acts as each shipment's assigned driver through the app's own serv
 every rule a person does (it cannot cancel, it cannot ping faster than every 10 seconds). It also
 picks up assigned shipments still waiting at the sender: assign the demo driver to a new shipment
 booked between two demo cities and watch it join. Options: `--speed 60` (time compression, default
-30), `--shipments 3`, `--seed 7`, `--once`. Ctrl+C stops it. When everything is delivered it says
-so; reseed for another run.
+30), `--shipments 3`, `--seed 7`, `--once`, `--target 10` (shipments to keep on the road, default
+6), `--no-refill` (let the fleet run down instead). Ctrl+C stops it. With `--no-refill`, when everything is
+delivered it says so; reseed for another run.
 
 The seed runs once (a re-run is a no-op, because history is never deleted). For fresh dates, run
 `pnpm db:seed --reset`, which wipes and re-creates the local `waybill` database only.
@@ -116,22 +128,23 @@ The seed runs once (a re-run is a no-op, because history is never deleted). For 
 
 ## Scripts
 
-| Script               | Purpose                                                    |
-| -------------------- | ---------------------------------------------------------- |
-| `pnpm dev`           | Next.js dev server                                         |
-| `pnpm build`         | Production build                                           |
-| `pnpm start`         | Serve the production build                                 |
-| `pnpm lint`          | ESLint                                                     |
-| `pnpm typecheck`     | Generate route types, then `tsc --noEmit`                  |
-| `pnpm format:check`  | Prettier check (`pnpm format` to fix)                      |
-| `pnpm test`          | Vitest: unit and integration tests                         |
-| `pnpm test:e2e`      | Playwright end-to-end tests against a production build     |
-| `pnpm db:generate`   | Generate a migration from the Drizzle schema               |
-| `pnpm db:migrate`    | Apply migrations to `DATABASE_URL`                         |
-| `pnpm db:seed`       | Load the demo data (`--reset` recreates the dev database)  |
-| `pnpm auth:generate` | Regenerate the Better Auth tables (must be a no-op change) |
-| `pnpm simulate`      | Drive the demo trucks so the live map moves (dev DB only)  |
-| `pnpm routes:fetch`  | One-off: re-fetch the committed road route fixture (OSRM)  |
+| Script               | Purpose                                                     |
+| -------------------- | ----------------------------------------------------------- |
+| `pnpm dev`           | Next.js dev server                                          |
+| `pnpm build`         | Production build                                            |
+| `pnpm start`         | Serve the production build                                  |
+| `pnpm lint`          | ESLint                                                      |
+| `pnpm typecheck`     | Generate route types, then `tsc --noEmit`                   |
+| `pnpm format:check`  | Prettier check (`pnpm format` to fix)                       |
+| `pnpm test`          | Vitest: unit and integration tests                          |
+| `pnpm test:e2e`      | Playwright end-to-end tests against a production build      |
+| `pnpm db:generate`   | Generate a migration from the Drizzle schema                |
+| `pnpm db:migrate`    | Apply migrations to `DATABASE_URL`                          |
+| `pnpm db:seed`       | Load the demo data (`--reset` recreates the dev database)   |
+| `pnpm auth:generate` | Regenerate the Better Auth tables (must be a no-op change)  |
+| `pnpm simulate`      | Drive the demo trucks so the live map moves (dev DB only)   |
+| `pnpm routes:fetch`  | One-off: re-fetch the committed road route fixture (OSRM)   |
+| `pnpm vercel-build`  | The deploy build: validate env, migrate, seed (demo), build |
 
 ## Credits
 
@@ -142,6 +155,7 @@ The seed runs once (a re-run is a no-op, because history is never deleted). For 
 
 ## Documentation
 
+- [Deployment guide](docs/deployment.md): click-by-click Vercel + Neon setup, demo mode, troubleshooting.
 - [Architecture](docs/architecture.md): system design, state machine, multi-tenancy, decisions log.
 - [Engineering notes](docs/engineering-notes.md): the problems worth discussing and the tradeoffs.
 - [Implementation notes](docs/implementation-notes.md): status, roadmap, gotchas, environment.

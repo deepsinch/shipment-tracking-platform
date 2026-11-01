@@ -13,6 +13,8 @@
  *   --speed <x>      time compression (default 30: a 12 s tick covers 6 minutes of driving)
  *   --seed <n>       PRNG seed for exceptions (default 1); same data + same seed = same run
  *   --shipments <n>  drive at most n trucks at a time
+ *   --no-refill      do not book new shipments when the trucks run low
+ *   --target <n>     keep at least n unfinished shipments by booking more (default 6)
  *   --tick <s>       seconds between ticks (default 12, at least 11: pings are throttled to one
  *                    per 10 s per shipment)
  *
@@ -23,19 +25,17 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { parseArgs } from "node:util";
 
 import { config as loadEnv } from "dotenv";
-import { eq } from "drizzle-orm";
 
+import { DEMO_ORGANIZATION_NAME } from "@/domain/demo";
 import { PING_INTERVAL_MS } from "@/domain/location-sharing";
 import { createRandom } from "@/lib/random";
-import { resolveAuthContext, type AuthContext } from "@/server/auth/auth-context";
-import { closeDb, getDb } from "@/server/db/client";
+import { closeDb } from "@/server/db/client";
 import { assertDatabaseName } from "@/server/db/maintenance";
-import { member, user } from "@/server/db/schema";
+import { resolveDemoDispatcher, resolveDemoDrivers } from "@/server/demo/fleet";
 import { closeRealtimeBus } from "@/server/realtime";
-import { DEMO_ORGANIZATION_NAME, DEMO_USERS } from "@/server/seed/demo-seed";
+import { DEFAULT_REFILL } from "@/server/simulator/booking";
 import { createSimulator } from "@/server/simulator/simulator";
 import { DEFAULT_SIMULATOR_CONFIG } from "@/server/simulator/truck";
-import { listDrivers } from "@/server/services/list-drivers";
 
 loadEnv({ quiet: true });
 
@@ -48,6 +48,8 @@ function parseOptions() {
       speed: { type: "string" },
       seed: { type: "string" },
       shipments: { type: "string" },
+      "no-refill": { type: "boolean", default: false },
+      target: { type: "string" },
       tick: { type: "string" },
     },
   });
@@ -67,6 +69,8 @@ function parseOptions() {
       values.shipments === undefined
         ? undefined
         : Math.trunc(number("shipments", values.shipments, 0, 1)),
+    refill: !values["no-refill"],
+    target: Math.trunc(number("target", values.target, DEFAULT_REFILL.target, 1)),
     tickMs:
       number(
         "tick",
@@ -75,35 +79,6 @@ function parseOptions() {
         (PING_INTERVAL_MS + 1000) / 1000,
       ) * 1000,
   };
-}
-
-/** The demo organization's drivers, as the AuthContext each would get from a session. */
-async function demoDrivers(): Promise<AuthContext[]> {
-  const admin = DEMO_USERS[0];
-  const [row] = await getDb()
-    .select({ userId: user.id, organizationId: member.organizationId })
-    .from(user)
-    .innerJoin(member, eq(member.userId, user.id))
-    .where(eq(user.email, admin.email))
-    .limit(1);
-  if (!row)
-    throw new Error(`${DEMO_ORGANIZATION_NAME} is not seeded yet. Run \`pnpm db:seed\` first.`);
-
-  const adminContext = await resolveAuthContext({
-    userId: row.userId,
-    activeOrganizationId: row.organizationId,
-  });
-  if (!adminContext)
-    throw new Error(`${admin.email} is no longer a member of ${DEMO_ORGANIZATION_NAME}.`);
-  const drivers = await listDrivers(adminContext);
-  if (!drivers.ok) throw new Error(`${admin.email} may not list drivers.`);
-
-  const contexts = await Promise.all(
-    drivers.drivers.map((driver) =>
-      resolveAuthContext({ userId: driver.id, activeOrganizationId: row.organizationId }),
-    ),
-  );
-  return contexts.filter((context) => context !== null);
 }
 
 async function main(): Promise<void> {
@@ -123,12 +98,15 @@ async function main(): Promise<void> {
     stop.abort();
   });
 
-  const drivers = await demoDrivers();
+  const drivers = await resolveDemoDrivers();
   const simulator = createSimulator({
     drivers,
     random: createRandom(options.seed),
     config: { timeCompression: options.speed, tickMs: options.tickMs },
     maxShipments: options.shipments,
+    refill: options.refill
+      ? { dispatcher: await resolveDemoDispatcher(), target: options.target }
+      : undefined,
     log: (line) => console.log(line),
   });
   console.log(
@@ -141,7 +119,8 @@ async function main(): Promise<void> {
     if (report.remaining === 0) {
       console.log(
         "Nothing left to drive: every assigned shipment is delivered (or with the office).\n" +
-          "Run `pnpm db:seed --reset` for a fresh demo, or assign a driver to a new shipment.",
+          "Run `pnpm simulate` without --no-refill to book new ones, `pnpm db:seed --reset` for a\n" +
+          "fresh demo, or assign a driver to a new shipment.",
       );
       break;
     }

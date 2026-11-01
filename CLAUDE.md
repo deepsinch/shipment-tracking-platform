@@ -48,10 +48,12 @@ src/
 - Forms whose input a live refresh could wipe carry `data-unsaved-guard`.
 - Maps (MapLibre) are client-only and supplementary: every map has a text equivalent that keyboard
   and screen-reader users can use, and the public page never shows a map or coordinates.
-- E2E specs import `test` from `tests/e2e/fixtures.ts` (map tiles blocked, no network dependency);
+- E2E specs (never run with `E2E_MAP_TILES=live` in CI) import `test` from `tests/e2e/fixtures.ts` (map tiles blocked, no network dependency);
   contexts a spec creates itself call `blockMapTiles`.
 - Anything with history (users, organizations, shipments) is deactivated, never hard-deleted: foreign keys
   to history are `restrict`.
+- Migrations run during deploy while the previous release may still serve traffic, so every
+  migration is backward compatible with the previous release (expand now, contract in a later release).
 - Database constraints (CHECKs, composite FKs) complement Zod validation; they never replace it.
 - Auth: the real guard is a server-side check (layout or session helper). `proxy.ts` may redirect
   optimistically but is never the only check.
@@ -61,6 +63,10 @@ src/
   `datetime-local` as UTC) until per-organization time zones exist.
 - Server Actions map every service result kind to a user-facing state (never a generic error), and
   echo back non-secret submitted values so nothing typed is lost.
+- App and server code read environment variables only through `src/server/env.ts` (scripts and test
+  setup may read their own).
+- Any new external origin (API, CDN, tiles) is added to `src/lib/security-headers.ts`; the CSP e2e
+  spec fails on violations. `dangerouslySetInnerHTML` is banned by lint (part of the CSP tradeoff).
 - Importing a module must not require environment variables (e.g. the DB pool is created lazily), so
   `next build` works without a database.
 
@@ -93,7 +99,9 @@ src/
 ## Workflow
 
 - The main session acts as architect and reviewer.
-- Implementation is delegated to an Opus subagent at medium effort.
+- Implementation is delegated to a Sonnet subagent: medium effort by default, high effort for
+  checkpoints with security or concurrency guarantees (auth, API keys, webhooks, uploads, throttles).
+  (Phases 1, 2 and Phase 4a checkpoint 1 were implemented by Opus at medium effort.)
 - One branch per phase (`phase-N-<name>`), small logical commits.
 - Work is split into checkpoints (listed in `docs/implementation-notes.md`). The implementor finishes one
   checkpoint with all checks green and a clean tree, commits, stops and reports. It never pushes.
@@ -124,7 +132,8 @@ src/
   git config committer.email "noreply@anthropic.com"
   ```
   Check with `git log -1 --format='%an <%ae> / %cn <%ce> / sig:%G?'` after the first commit.
-- Every commit message ends with these two trailer lines (the session URL changes per session; use the current one):
+- Every commit message ends with these two trailer lines. Name the model that actually wrote the commit
+  (the implementor's model for its commits, e.g. `Claude Sonnet 5.5`), and use the current session URL:
   ```
   Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
   Claude-Session: https://claude.ai/code/<current session id>
@@ -138,6 +147,9 @@ src/
   `pnpm test` needs both: its integration project wipes and re-migrates the `*_test` database.
 - Three databases: `waybill` (dev), `waybill_test` (integration, wiped every run, name must end in `_test`)
   and `waybill_e2e` (`E2E_DATABASE_URL`, wiped by `test:e2e`, name must end in `_e2e`, created on first run).
+  Demo mode adds `<test db>_demo_test` (reset and tick integration tests) and `waybill_demo_e2e` (the
+  demo e2e server), both created on first use. Hosted resets only wipe databases listed in
+  `DEMO_RESET_DATABASES`.
 - Playwright: use the preinstalled chromium at `/opt/pw-browsers/chromium`
   (via `launchOptions.executablePath`). Never run `playwright install`.
 - Docker is unavailable.

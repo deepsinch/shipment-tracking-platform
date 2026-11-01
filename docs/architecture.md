@@ -441,6 +441,8 @@ As implemented (checkpoint 4):
 
 ### Truck simulator
 
+(Refill, added after checkpoint 5 of phase 2: see "Refill" at the end of this section.)
+
 - A script that drives seeded active shipments: it posts pings and status changes as the assigned
   driver through the same services, so the demo map moves.
 - Routes come from committed fixtures. A one-off script fetches road geometry for the seed's city
@@ -499,42 +501,195 @@ maxShipments, clock, log })`. Each tick re-reads every driver's assigned unfinis
   when nothing is left to drive. Assigned shipments still at the sender are picked up, so a
   dispatcher can assign the demo driver to a new booking during a demo and watch it join.
 
+Refill (phase 4a follow-up):
+
+- **Why.** On the hosted demo, trucks move only while someone views the map, and viewing time adds
+  up across visitors, so within minutes every seeded truck was delivered and the map stayed empty
+  until the nightly reset.
+- **Decision (pure).** `planRefill(unfinished, { target, maxPerTick })` in
+  `src/server/simulator/booking.ts` returns how many to book: the gap to `target`, capped by
+  `maxPerTick`, never negative. Defaults 6 and 2, so an empty fleet refills over three ticks.
+  `draftBooking(random, now, pairs)` makes the shipment's values from the simulator's PRNG in a
+  fixed order: a city pair, service level, reference, recipient, weight and a promised delivery
+  (17:00 UTC, a service-level number of days out, at least two hours ahead, so a booking is never
+  born late). `bookablePairs(routes)` limits pairs to the committed road routes of at most 300 km
+  (about 40 ticks at the default speed), so trucks follow real roads and deliveries happen while
+  someone watches.
+- **Wiring.** `createSimulator({ refill: { dispatcher, target?, maxPerTick? } })`, off when
+  omitted. After driving, a tick counts the shipments still to drive; if short, it books as the
+  dispatcher with `createShipment` (booking time from the injected clock), then assigns the first
+  driver with `assignDriver`, using the version `createShipment` returned. Nothing else writes. The
+  next tick sees an assigned `created` shipment and picks it up with the existing behaviour. A
+  refused booking is logged and ends that tick's refill. `TickReport` gained `booked` (tracking
+  codes), and `remaining` includes them, so `pnpm simulate` does not stop right after booking.
+- **What counts as unfinished.** The shipments the simulator can still drive: assigned to its
+  drivers, with coordinates, not held by the office in an exception. Unassigned or uncoordinated
+  shipments (a dispatcher's own bookings, the seed's unassigned ones) do not count, or a busy
+  office would starve the demo of moving trucks.
+- **Who.** The hosted tick (`getDemoSimulator`) and `pnpm simulate` turn it on by default, booking
+  as the seeded demo dispatcher (`resolveDemoDispatcher`, looked up by email on use, as the
+  nightly reset recreates the ids). `pnpm simulate --no-refill` and `--target <n>` adjust it.
+  Tests that do not pass `refill` are unchanged.
+- **Growth.** Delivered shipments stay in history until the nightly reset. The live map and the
+  driver's active list read only unfinished shipments (about six), and the shipment list
+  paginates, so many refills do not slow or clutter either.
+
+## Phase 4a: deployment (design)
+
+Goal: a live demo URL recruiters can open, built and verified automatically. This section is the
+architect's design; the implementation refines it.
+
+### Hosting
+
+- **Vercel** (Fluid compute) runs the Next.js app, importing the GitHub repository through
+  Vercel's Git integration. Pushes to `main` deploy to production, and pull requests get preview
+  deployments.
+- **Neon** Postgres, connected through the Neon integration in the Vercel marketplace. It injects a
+  pooled `DATABASE_URL` and a direct `DATABASE_URL_UNPOOLED`, and can create a database branch per
+  preview deployment. The app maps the direct URL to `DATABASE_DIRECT_URL` for the realtime
+  `LISTEN` connection and for migrations.
+- No deploy secrets live in GitHub or pass through anyone's chat: the owner connects Vercel and Neon
+  in their dashboards, and the integrations manage credentials.
+
+### Build, migrations and seed
+
+- A `vercel-build` script runs, in order: environment validation, migrations (direct URL), the demo
+  seed (a no-op when the demo organization exists), then `next build`. A failed migration fails
+  the deploy instead of shipping code against an old schema.
+- Migrations run before the new code serves traffic while the old code may still be serving, so
+  every migration must be backward compatible with the previous release (expand, then contract in a
+  later release). This rule goes into `CLAUDE.md`.
+- Runtime environment variables are validated with Zod in one module (`src/server/env.ts`), with
+  clear messages naming the missing variable. Validation runs on first use, never at import, so the
+  build-time rule (importing must not require env vars) still holds. As built: the module exposes
+  groups (`env.database`, `env.auth`, `env.realtime`, `env.demo`), each validated the first time
+  it is read, so a script that only touches the database does not need the auth secret; and
+  `validateEnv` checks every group at once for the deploy step. The direct URL resolves
+  `DATABASE_DIRECT_URL`, then `DATABASE_URL_UNPOOLED` (the Neon integration's name), then
+  `DATABASE_URL`, so no manual mapping is needed on Vercel.
+
+### Continuous integration
+
+- GitHub Actions on every push and pull request: format, lint, typecheck, unit and integration tests
+  against a Postgres service container, build, and Playwright end-to-end tests (CI installs
+  Playwright's own Chromium; the config already falls back to it outside this environment).
+- CI only verifies; deploys come from Vercel's Git integration. A failing check is visible on the
+  pull request before merge.
+- As built (`.github/workflows/ci.yml`): one job, `contents: read`, superseded runs cancelled. The
+  production build runs before any environment exists, so the "no env at import" rule is checked
+  on every push; tests then get a Postgres 16 service container and a throwaway auth secret.
+  Playwright's report and traces are uploaded when the job fails.
+
+### Demo mode (`DEMO_MODE=true` in production)
+
+- **Banner and credentials.** A small banner says this is a demo whose data resets nightly, and the
+  sign-in page offers the three demo accounts with one click each.
+- **Nightly reset.** A Vercel Cron job (daily, which the Hobby plan allows) calls
+  `/api/cron/reset-demo` with `CRON_SECRET`. It wipes and re-migrates the demo database and re-seeds
+  it, because history cannot be deleted row by row by design. It refuses unless demo mode is on and
+  the secret matches, and the database name guard still applies.
+- **Trucks move while someone watches.** Vercel cannot run a long-lived simulator process, and
+  per-minute cron needs a paid plan. Instead, while the live map or a shipment page is open in demo
+  mode, the client asks `/api/demo/tick` to advance the simulator by one tick. A global throttle in
+  Postgres (one tick per 12 seconds, whatever the number of viewers, using the same conditional
+  upsert pattern as the ping throttle) means trucks move at the same pace for everyone, and nothing
+  runs when nobody is looking. The tick runs the existing simulator core through the real services.
+  The endpoint does nothing unless demo mode is on.
+
+### As built (checkpoint 2)
+
+- **Auth origin per environment.** `resolveAuthUrls` (`src/server/auth/base-url.ts`, pure):
+  `BETTER_AUTH_URL`, else `https://$VERCEL_PROJECT_PRODUCTION_URL` in production and
+  `https://$VERCEL_BRANCH_URL` (or `$VERCEL_URL`) in previews, else an error outside Vercel. Better
+  Auth's `trustedOrigins` holds every host of the deployment (unique, branch, production, plus the
+  explicit URL), so previews and the alias addresses of one deployment all work without
+  per-preview configuration.
+- **Build.** `pnpm vercel-build` (`vercel.json` names it as `buildCommand`): validate every
+  environment group, `migrateDatabase(directUrl)` under an advisory lock, `seedDemo()` only in
+  demo mode, `next build`. The plan is a pure function (`buildPlan`). In demo mode the build also
+  refuses a database that is not in `DEMO_RESET_DATABASES`.
+- **Guards: wipes only.** A database name is checked only where something is wiped. Local tools
+  keep their fixed names (`waybill`, `*_test`, `*_e2e`); the hosted reset uses an explicit
+  allow-list in the environment (`DEMO_RESET_DATABASES`), because hosts name databases themselves
+  (`neondb`), and requires demo mode, the cron secret and the same database behind the pooled and
+  direct URLs. Migrations and seeding never depend on a name.
+- **Reset.** `GET /api/cron/reset-demo`: 404 unless demo mode, 401 unless `Bearer <CRON_SECRET>`
+  (constant-time on digests), then drop and recreate the schemas, migrate (the SQL files are traced
+  into the function; the folder is relative to the working directory), seed. Everyone is signed
+  out by it: sessions live in the database.
+- **Tick.** `POST /api/demo/tick` calls `advanceDemoSimulation`: demo mode, session, demo
+  organization (the seeded admin's, never found by name), then `claimDemoTick` (conditional upsert
+  on `demo_tick_state`, one per 12 s globally), then one tick of the per-instance simulator, whose
+  drivers are re-resolved every tick. The client (`createDemoTicker`) pauses in hidden tabs.
+- **Demo UI at request time.** Banner, one-click buttons and ticker render through `DemoOnly`
+  (`connection()` inside `Suspense`), so one build serves both modes. The buttons call a Server
+  Action that signs in through the normal service (rate limits apply).
+
+### Hardening
+
+- Security headers: `Content-Security-Policy` (allowing OpenFreeMap tiles and workers),
+  `Referrer-Policy`, `X-Content-Type-Options`, `X-Frame-Options`/`frame-ancestors`, and
+  `Permissions-Policy` allowing geolocation only for the app itself. Vercel adds HSTS.
+- As built (`src/lib/security-headers.ts`, applied in `next.config.ts` to every path): a static
+  CSP, `default-src 'self'`; scripts from this origin plus inline (decision 40); inline styles
+  (React `style` props, MapLibre); `connect-src` this origin (SSE stream, Server Actions) and
+  `https://tiles.openfreemap.org` (style, tiles, glyphs, sprites); `worker-src 'self'` (MapLibre's
+  bundled worker); `img-src 'self' data:`; `object-src 'none'`, `base-uri 'self'`,
+  `form-action 'self'`, `frame-ancestors 'none'`. `Referrer-Policy: strict-origin-when-cross-origin`
+  (tracking codes in URLs never leave as referrers), `Permissions-Policy` with `geolocation=(self)`
+  and camera, microphone, payment and USB off. An e2e spec walks every surface and fails on any
+  CSP violation.
+- `robots.txt` that disallows the dashboard, driver app and tracking pages; only the landing page is
+  indexable. As built, `/api` and the auth pages are disallowed too, and everything else (the
+  landing page and its `/_next/` assets) stays allowed.
+
 ## Decisions log
 
-| #   | Decision                                                                            | Why                                                                                                                        | Alternatives considered                                                                                                           |
-| --- | ----------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | Append-only events + status projection                                              | Audit trail and customer timeline from one source of truth                                                                 | Status column only (loses history)                                                                                                |
-| 2   | Optimistic concurrency via version column                                           | No locks held across user think-time, conflicts are explicit                                                               | `SELECT ... FOR UPDATE` (fine inside one request, but does not catch stale forms)                                                 |
-| 3   | State machine in pure TS                                                            | Unit testable, shared by UI (only show allowed buttons) and server (enforce)                                               | DB check constraints (cannot express transitions cleanly)                                                                         |
-| 4   | Org from session, never from input                                                  | Prevents cross-tenant access by construction                                                                               | Passing org id in URLs                                                                                                            |
-| 5   | Better Auth with organization plugin                                                | Orgs, members and roles out of the box, Drizzle adapter                                                                    | Auth.js (no built-in orgs), Clerk (hosted, vendor lock-in)                                                                        |
-| 6   | Integration tests against a real Postgres, re-migrated per run                      | Triggers, enums, FKs and transactions are what we need to prove; mocks or SQLite cannot run them                           | Mocked DB layer, pg-mem, Testcontainers (no Docker here)                                                                          |
-| 7   | Tenant consistency enforced by a composite FK                                       | Makes a cross-org event impossible even with an application bug                                                            | App-level checks only; a trigger                                                                                                  |
-| 8   | Role read from the membership row per request                                       | Demotions and removals take effect immediately                                                                             | Role cached in the session or a JWT (stale until expiry)                                                                          |
-| 9   | Driver scope as a shared `WHERE` helper, out-of-scope = not found                   | One place for tenant and role scoping; drivers cannot probe which shipments exist                                          | Per-service checks after loading the row; `forbidden` for drivers                                                                 |
-| 10  | Tracking code retry via `ON CONFLICT DO NOTHING` in the transaction                 | A unique violation would abort the transaction; this avoids savepoints and error-code parsing                              | Catch `23505` and retry the whole transaction; savepoint per attempt                                                              |
-| 11  | Rate limits as fixed-window counters in Postgres                                    | Shared by every serverless instance; one atomic upsert per attempt; no new infrastructure                                  | In-memory (resets per instance and cold start), Redis/Upstash (extra service), sliding window (more state for little gain)        |
-| 12  | Seed through the services, skip if present                                          | Seed data can never violate rules the app enforces, and the seed breaks loudly if the rules change                         | Raw SQL inserts (can drift from the rules), truncate and reseed (history cannot be deleted)                                       |
-| 13  | Location pings in their own tables, not `shipment_events`                           | History stays meaningful; telemetry can be throttled, pruned and indexed for "latest position"                             | Pings as events (floods history and the public timeline)                                                                          |
-| 14  | Latest position in `shipment_positions`, upserted with each ping                    | Maps read one row per shipment; status `version` is untouched by telemetry                                                 | Max-per-group query over pings; columns on `shipments` (would collide with optimistic concurrency)                                |
-| 15  | Realtime messages are invalidations; clients re-fetch on (re)connect                | Missed messages lose nothing; no event log or replay cursor to maintain                                                    | Replaying an event log with `Last-Event-ID`                                                                                       |
-| 16  | `pg_notify` inside the write transaction, one `LISTEN` per instance, SSE to clients | Notifications only for committed writes; no new infrastructure; SSE matches one-way traffic                                | WebSockets (two-way, harder on serverless); hosted pub/sub (extra service, kept possible via `RealtimeBus`); polling              |
-| 17  | OpenFreeMap tiles with MapLibre                                                     | Free, no API key, OSM data, allowed for app traffic                                                                        | `tile.openstreetmap.org` (usage policy), Mapbox/MapTiler (API keys, quotas)                                                       |
-| 18  | Simulator routes from committed OSRM fixtures                                       | Real roads without a runtime dependency on a public routing server                                                         | Live routing calls; straight-line interpolation only                                                                              |
-| 19  | Driver assignment bumps `version` and is refused once a shipment is finished        | A form rendered before a reassignment is stale like any other; a finished job keeps its record                             | Separate assignment version (stale status forms would win); no version check (silent overwrite)                                   |
-| 20  | Ping throttle as a conditional upsert on `shipment_positions`                       | One statement is both the check and the write; Postgres re-checks it under the row lock, so parallel pings cannot both win | Read-then-write check (races); advisory lock per shipment (extra round trip, easy to forget); Redis rate limiter (new service)    |
-| 21  | `location_pings` rejects UPDATE but allows DELETE                                   | Fixes are never corrected, but telemetry must be prunable (30-day retention)                                               | Full append-only trigger like events (blocks retention); no trigger (fixes could be edited)                                       |
-| 22  | Pings sent through a Server Action                                                  | Only our own client calls it; session, origin check and typed arguments come for free                                      | Route handler (needed later for a native app or the public API, over the same service)                                            |
-| 23  | `resync` signal from the bus marks when delivery starts                             | Re-fetching on the browser's `open` event can miss a change committed before `LISTEN` is active; the first `resync` cannot | Client re-fetch on `open`; making the route wait for `LISTEN` before responding (needs a timeout and a 503 path)                  |
-| 24  | Pure `isVisibleTo` filter on the message, with `previousDriverId` in assignments    | No query per message per stream; a driver still hears about the shipment taken away from them                              | Re-checking `visibleShipments` per message (a query per event per stream); broadcasting and filtering in the browser              |
-| 25  | Listener kept 30 s after the last subscriber leaves                                 | Streams reconnect routinely; avoids a new connection and `LISTEN` on every gap while bounding idle connections             | Close immediately (churn); keep forever (an idle direct connection per instance)                                                  |
-| 26  | Refresh deferred while a version-keyed form has unsaved input                       | A live refresh must never wipe what the user typed; the conflict flow still guards stale submissions                       | Always refresh (loses input); never refresh pages with forms (stale data); controlled forms that survive remounts (larger change) |
-| 27  | Live map as its own route, `/dashboard/map`, beside the list                        | Shareable URL; the list stays free of MapLibre; the map shows a different set (unfinished, positioned, unpaginated)        | A toggle on the list page (map code and query on every list view); a map above the list (paginated data does not fit a map)       |
-| 28  | Map snapshot re-rendered by `LiveRefresh`, merged with live fixes on the client     | No new endpoint or auth surface; resync, coalescing and Activity handling reused; newest fix wins in any order             | A route handler or Server Action returning the snapshot (second data path to secure and test); re-fetch per position (wasteful)   |
-| 29  | DOM markers, not a GeoJSON symbol layer                                             | Focusable buttons with accessible labels, Tailwind styling, simple click handling; fine for a small carrier's fleet        | Symbol/circle layer (faster for thousands of points, but no keyboard focus or labels; would add clustering at scale)              |
-| 30  | OpenFreeMap "positron" basemap                                                      | Pale, data-first style: status colours stay the only colour on the map                                                     | "liberty" (colourful; greens and blues compete with the status colours), "bright"                                                 |
-| 31  | Seed drafted as pure data, then applied through the services                        | Fixture script and coverage test read the seed's city pairs without a database; draw order kept, so data is unchanged      | Hard-coded pair list (drifts from the seed); fetching every city pair (156 requests, larger file)                                 |
-| 32  | Routes matched by stop coordinates, server-only lookup, straight-line fallback      | Independent of city spelling; fixture never shipped to browsers; any shipment still gets a line                            | Match by city name; shipping the fixture to the client; live routing calls                                                        |
-| 33  | Simulator as pure planner plus service wiring, state re-read every tick             | Every rule enforced by the real services; plans unit tested; dispatchers can intervene mid-run                             | Raw SQL writes (bypass rules and realtime); a long-lived in-memory model of each shipment (goes stale)                            |
-| 34  | Exception ownership read from history (who recorded it)                             | Restarts and `--once` runs never strand a shipment; office holds are respected                                             | In-memory list of the simulator's own exceptions (lost on restart); clearing every exception (overrides the office)               |
-| 35  | 12 s simulator tick with time compression                                           | Clear of the 10 s ping throttle with margin for jitter; compression keeps movement visible                                 | 10 s tick (frequently throttled); faster ticks with dropped pings; real-time speed (trucks barely move)                           |
+| #   | Decision                                                                                                           | Why                                                                                                                                                                                        | Alternatives considered                                                                                                                                                    |
+| --- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Append-only events + status projection                                                                             | Audit trail and customer timeline from one source of truth                                                                                                                                 | Status column only (loses history)                                                                                                                                         |
+| 2   | Optimistic concurrency via version column                                                                          | No locks held across user think-time, conflicts are explicit                                                                                                                               | `SELECT ... FOR UPDATE` (fine inside one request, but does not catch stale forms)                                                                                          |
+| 3   | State machine in pure TS                                                                                           | Unit testable, shared by UI (only show allowed buttons) and server (enforce)                                                                                                               | DB check constraints (cannot express transitions cleanly)                                                                                                                  |
+| 4   | Org from session, never from input                                                                                 | Prevents cross-tenant access by construction                                                                                                                                               | Passing org id in URLs                                                                                                                                                     |
+| 5   | Better Auth with organization plugin                                                                               | Orgs, members and roles out of the box, Drizzle adapter                                                                                                                                    | Auth.js (no built-in orgs), Clerk (hosted, vendor lock-in)                                                                                                                 |
+| 6   | Integration tests against a real Postgres, re-migrated per run                                                     | Triggers, enums, FKs and transactions are what we need to prove; mocks or SQLite cannot run them                                                                                           | Mocked DB layer, pg-mem, Testcontainers (no Docker here)                                                                                                                   |
+| 7   | Tenant consistency enforced by a composite FK                                                                      | Makes a cross-org event impossible even with an application bug                                                                                                                            | App-level checks only; a trigger                                                                                                                                           |
+| 8   | Role read from the membership row per request                                                                      | Demotions and removals take effect immediately                                                                                                                                             | Role cached in the session or a JWT (stale until expiry)                                                                                                                   |
+| 9   | Driver scope as a shared `WHERE` helper, out-of-scope = not found                                                  | One place for tenant and role scoping; drivers cannot probe which shipments exist                                                                                                          | Per-service checks after loading the row; `forbidden` for drivers                                                                                                          |
+| 10  | Tracking code retry via `ON CONFLICT DO NOTHING` in the transaction                                                | A unique violation would abort the transaction; this avoids savepoints and error-code parsing                                                                                              | Catch `23505` and retry the whole transaction; savepoint per attempt                                                                                                       |
+| 11  | Rate limits as fixed-window counters in Postgres                                                                   | Shared by every serverless instance; one atomic upsert per attempt; no new infrastructure                                                                                                  | In-memory (resets per instance and cold start), Redis/Upstash (extra service), sliding window (more state for little gain)                                                 |
+| 12  | Seed through the services, skip if present                                                                         | Seed data can never violate rules the app enforces, and the seed breaks loudly if the rules change                                                                                         | Raw SQL inserts (can drift from the rules), truncate and reseed (history cannot be deleted)                                                                                |
+| 13  | Location pings in their own tables, not `shipment_events`                                                          | History stays meaningful; telemetry can be throttled, pruned and indexed for "latest position"                                                                                             | Pings as events (floods history and the public timeline)                                                                                                                   |
+| 14  | Latest position in `shipment_positions`, upserted with each ping                                                   | Maps read one row per shipment; status `version` is untouched by telemetry                                                                                                                 | Max-per-group query over pings; columns on `shipments` (would collide with optimistic concurrency)                                                                         |
+| 15  | Realtime messages are invalidations; clients re-fetch on (re)connect                                               | Missed messages lose nothing; no event log or replay cursor to maintain                                                                                                                    | Replaying an event log with `Last-Event-ID`                                                                                                                                |
+| 16  | `pg_notify` inside the write transaction, one `LISTEN` per instance, SSE to clients                                | Notifications only for committed writes; no new infrastructure; SSE matches one-way traffic                                                                                                | WebSockets (two-way, harder on serverless); hosted pub/sub (extra service, kept possible via `RealtimeBus`); polling                                                       |
+| 17  | OpenFreeMap tiles with MapLibre                                                                                    | Free, no API key, OSM data, allowed for app traffic                                                                                                                                        | `tile.openstreetmap.org` (usage policy), Mapbox/MapTiler (API keys, quotas)                                                                                                |
+| 18  | Simulator routes from committed OSRM fixtures                                                                      | Real roads without a runtime dependency on a public routing server                                                                                                                         | Live routing calls; straight-line interpolation only                                                                                                                       |
+| 19  | Driver assignment bumps `version` and is refused once a shipment is finished                                       | A form rendered before a reassignment is stale like any other; a finished job keeps its record                                                                                             | Separate assignment version (stale status forms would win); no version check (silent overwrite)                                                                            |
+| 20  | Ping throttle as a conditional upsert on `shipment_positions`                                                      | One statement is both the check and the write; Postgres re-checks it under the row lock, so parallel pings cannot both win                                                                 | Read-then-write check (races); advisory lock per shipment (extra round trip, easy to forget); Redis rate limiter (new service)                                             |
+| 21  | `location_pings` rejects UPDATE but allows DELETE                                                                  | Fixes are never corrected, but telemetry must be prunable (30-day retention)                                                                                                               | Full append-only trigger like events (blocks retention); no trigger (fixes could be edited)                                                                                |
+| 22  | Pings sent through a Server Action                                                                                 | Only our own client calls it; session, origin check and typed arguments come for free                                                                                                      | Route handler (needed later for a native app or the public API, over the same service)                                                                                     |
+| 23  | `resync` signal from the bus marks when delivery starts                                                            | Re-fetching on the browser's `open` event can miss a change committed before `LISTEN` is active; the first `resync` cannot                                                                 | Client re-fetch on `open`; making the route wait for `LISTEN` before responding (needs a timeout and a 503 path)                                                           |
+| 24  | Pure `isVisibleTo` filter on the message, with `previousDriverId` in assignments                                   | No query per message per stream; a driver still hears about the shipment taken away from them                                                                                              | Re-checking `visibleShipments` per message (a query per event per stream); broadcasting and filtering in the browser                                                       |
+| 25  | Listener kept 30 s after the last subscriber leaves                                                                | Streams reconnect routinely; avoids a new connection and `LISTEN` on every gap while bounding idle connections                                                                             | Close immediately (churn); keep forever (an idle direct connection per instance)                                                                                           |
+| 26  | Refresh deferred while a version-keyed form has unsaved input                                                      | A live refresh must never wipe what the user typed; the conflict flow still guards stale submissions                                                                                       | Always refresh (loses input); never refresh pages with forms (stale data); controlled forms that survive remounts (larger change)                                          |
+| 27  | Live map as its own route, `/dashboard/map`, beside the list                                                       | Shareable URL; the list stays free of MapLibre; the map shows a different set (unfinished, positioned, unpaginated)                                                                        | A toggle on the list page (map code and query on every list view); a map above the list (paginated data does not fit a map)                                                |
+| 28  | Map snapshot re-rendered by `LiveRefresh`, merged with live fixes on the client                                    | No new endpoint or auth surface; resync, coalescing and Activity handling reused; newest fix wins in any order                                                                             | A route handler or Server Action returning the snapshot (second data path to secure and test); re-fetch per position (wasteful)                                            |
+| 29  | DOM markers, not a GeoJSON symbol layer                                                                            | Focusable buttons with accessible labels, Tailwind styling, simple click handling; fine for a small carrier's fleet                                                                        | Symbol/circle layer (faster for thousands of points, but no keyboard focus or labels; would add clustering at scale)                                                       |
+| 30  | OpenFreeMap "positron" basemap                                                                                     | Pale, data-first style: status colours stay the only colour on the map                                                                                                                     | "liberty" (colourful; greens and blues compete with the status colours), "bright"                                                                                          |
+| 31  | Seed drafted as pure data, then applied through the services                                                       | Fixture script and coverage test read the seed's city pairs without a database; draw order kept, so data is unchanged                                                                      | Hard-coded pair list (drifts from the seed); fetching every city pair (156 requests, larger file)                                                                          |
+| 32  | Routes matched by stop coordinates, server-only lookup, straight-line fallback                                     | Independent of city spelling; fixture never shipped to browsers; any shipment still gets a line                                                                                            | Match by city name; shipping the fixture to the client; live routing calls                                                                                                 |
+| 33  | Simulator as pure planner plus service wiring, state re-read every tick                                            | Every rule enforced by the real services; plans unit tested; dispatchers can intervene mid-run                                                                                             | Raw SQL writes (bypass rules and realtime); a long-lived in-memory model of each shipment (goes stale)                                                                     |
+| 34  | Exception ownership read from history (who recorded it)                                                            | Restarts and `--once` runs never strand a shipment; office holds are respected                                                                                                             | In-memory list of the simulator's own exceptions (lost on restart); clearing every exception (overrides the office)                                                        |
+| 35  | 12 s simulator tick with time compression                                                                          | Clear of the 10 s ping throttle with margin for jitter; compression keeps movement visible                                                                                                 | 10 s tick (frequently throttled); faster ticks with dropped pings; real-time speed (trucks barely move)                                                                    |
+| 36  | Vercel + Neon via their integrations, Git-based deploys                                                            | No deploy tokens to manage; preview databases per pull request; matches the realtime design (direct URL for `LISTEN`)                                                                      | Deploy from GitHub Actions with Vercel CLI tokens; a single VPS (more ops, no previews)                                                                                    |
+| 37  | Migrate and seed in `vercel-build`, backward-compatible migrations only                                            | A failed migration fails the deploy; the seed is idempotent; expand/contract keeps old code working during rollout                                                                         | Migrations from a separate CI job (races the Git-triggered deploy); manual migrations                                                                                      |
+| 38  | Demo trucks advance on view via a globally throttled tick endpoint                                                 | No long-running process or paid cron; nothing runs when nobody watches; same pace for every viewer                                                                                         | A permanent simulator worker (extra hosting); per-minute cron (paid plan); a GitHub Actions schedule (coarse, slow)                                                        |
+| 39  | Nightly demo reset by wiping and re-seeding the database                                                           | History is append-only by design, so a reset recreates the database instead of deleting rows                                                                                               | Deleting demo rows (would require weakening the history guarantees)                                                                                                        |
+| 40  | Static CSP in `next.config` with `'unsafe-inline'` scripts, everything else locked                                 | Next inlines the RSC payload; nonces force every page dynamic and break partial prerendering; hashes cannot cover per-request inline scripts                                               | Nonce per request from `proxy.ts` (no static shells, no CDN caching); experimental SRI (covers script files, not the inline payload)                                       |
+| 41  | Wipe guards by explicit allow-list (`DEMO_RESET_DATABASES`), checked at deploy and at reset                        | Hosts choose database names (`neondb`); a hard-coded name would block the hosted reset or tempt a loosened rule; only wipes need a guard                                                   | Hard-coded `waybill` (blocks Neon); a name pattern such as `*_demo` (the owner cannot rename Neon's default); no guard (a mis-set `DATABASE_URL` wipes real data)          |
+| 42  | Tick endpoint for signed-in members of the demo organization only                                                  | The demo's data is not public, a public write endpoint invites abuse, and the organization is identified by the seeded admin, not by a name anyone can pick                                | Public endpoint (anonymous visitors could drive trucks, no cost to abuse); any signed-in user (a stranger's own company could spend the throttle)                          |
+| 43  | Demo parts read `DEMO_MODE` at request time (`connection()` in `Suspense`)                                         | One build serves both modes (the e2e runs both from one build) and the static shell stays intact                                                                                           | Build-time read (bakes the mode into the build; needs a second build to test it); a client-side flag (leaks the mode into every bundle)                                    |
+| 44  | Migration folder relative to the working directory, traced into the reset route                                    | The reset migrates inside the running app, where a bundled `import.meta.dirname` points into build output and the SQL files are not shipped                                                | `import.meta.dirname` (breaks when bundled); embedding the SQL in code (a second copy of the migrations)                                                                   |
+| 45  | `pg_advisory_lock` around migrations                                                                               | Two deploys that share a database (production and a retried build) take turns instead of racing each other's DDL                                                                           | Rely on drizzle alone (no lock); a lock table (more state)                                                                                                                 |
+| 46  | The simulator books its own replacement shipments (pure `planRefill`, through `createShipment` and `assignDriver`) | A hosted demo that empties after a few minutes of viewing looks broken, and viewing time adds up across visitors; booking through the services keeps history, versions and realtime honest | Slower time compression (only delays the end); resetting the demo when empty (signs everyone out); inserting rows directly (bypasses every rule the demo is meant to show) |

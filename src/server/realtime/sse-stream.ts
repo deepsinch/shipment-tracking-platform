@@ -31,13 +31,12 @@ const MAX_LIFETIME_SECONDS = 290;
 
 /**
  * How long one stream stays open before closing itself so the browser reconnects cleanly, instead
- * of the platform killing the function at its time limit. `REALTIME_STREAM_SECONDS` overrides
- * the default, clamped to stay below `maxDuration`.
+ * of the platform killing the function at its time limit. `configuredSeconds` (from
+ * `REALTIME_STREAM_SECONDS`, validated in `src/server/env.ts`) overrides the default, clamped to
+ * stay below `maxDuration`.
  */
-export function streamLifetimeMs(env: Record<string, string | undefined> = process.env): number {
-  const configured = Number(env.REALTIME_STREAM_SECONDS);
-  const seconds =
-    Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_LIFETIME_SECONDS;
+export function streamLifetimeMs(configuredSeconds: number | undefined): number {
+  const seconds = configuredSeconds ?? DEFAULT_LIFETIME_SECONDS;
   return Math.min(MAX_LIFETIME_SECONDS, Math.max(MIN_LIFETIME_SECONDS, seconds)) * 1000;
 }
 

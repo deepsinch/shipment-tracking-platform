@@ -14,6 +14,8 @@ import { changeShipmentStatus } from "@/server/services/change-shipment-status";
 import { createShipment } from "@/server/services/create-shipment";
 import { getShipment } from "@/server/services/get-shipment";
 import { getShipmentPositions } from "@/server/services/get-shipment-positions";
+import { listAssignedShipments } from "@/server/services/list-assigned-shipments";
+import { listShipments } from "@/server/services/list-shipments";
 import { recordLocationPing } from "@/server/services/record-location-ping";
 import { createTestContext, createTestOrganization } from "../../../tests/integration/fixtures";
 import { recordRealtime } from "../../../tests/integration/realtime";
@@ -373,5 +375,134 @@ describe("the truck simulator", () => {
         expect(canSetStatus("driver", event.action.toStatus)).toBe(true);
       }
     }
+  });
+});
+
+describe("the simulator's refill", () => {
+  /** An organization with one dispatcher, one driver and a single shipment in the fleet. */
+  async function fleetOfOne() {
+    const { dispatcher, driver } = await setUp();
+    const first = await book(dispatcher, driver, BRUSSELS, ANTWERP);
+    return { dispatcher, driver, first };
+  }
+
+  async function unfinishedOf(ctx: AuthContext) {
+    const { active } = await listAssignedShipments(ctx);
+    return active;
+  }
+
+  it("books new work through the services once the fleet is delivered, and drives it", async () => {
+    const { dispatcher, driver, first } = await fleetOfOne();
+    const clock = steppingClock();
+    const simulator = createSimulator({
+      drivers: [driver],
+      random: createRandom(5),
+      config: FAST,
+      clock: clock.now,
+      refill: { dispatcher, target: 2, maxPerTick: 2 },
+    });
+
+    const reports = await runTicks(simulator, clock, 40);
+
+    // The original truck was delivered, and the fleet was refilled for the rest of the run.
+    const firstDetail = await getShipment(dispatcher, first.id);
+    if (!firstDetail.ok) throw new Error("not found");
+    expect(firstDetail.shipment.status).toBe("delivered");
+    const booked = reports.flatMap((report) => report.booked);
+    expect(booked.length).toBeGreaterThan(2);
+    // Never above the target: it books only the gap.
+    for (const report of reports) expect(report.remaining).toBeLessThanOrEqual(2);
+
+    const delivered = await listShipments(dispatcher, { pageSize: 100 });
+    if (!delivered.ok) throw new Error("list failed");
+    const mine = delivered.rows.filter((item) => booked.includes(item.trackingCode));
+    expect(mine).toHaveLength(booked.length);
+
+    for (const item of mine) {
+      expect(item.assignedDriverId).toBe(driver.userId);
+    }
+    const progressed = mine.filter((item) => item.status !== "created");
+    expect(progressed.length).toBeGreaterThan(0);
+    expect(mine.some((item) => item.status === "delivered")).toBe(true);
+
+    const sample = mine.find((item) => item.status === "delivered")!;
+
+    // The history shows the real path: booked and assigned by the dispatcher (the assignment is
+    // stamped with the real clock, which is ahead of the test's), then the driver's changes.
+    const detail = await getShipment(dispatcher, sample.id);
+    if (!detail.ok) throw new Error("not found");
+    for (const type of ["created", "driver_assigned"]) {
+      const events = detail.events.filter((event) => event.type === type);
+      expect(events).toHaveLength(1);
+      expect(events[0]!.actorUserId).toBe(dispatcher.userId);
+    }
+    expect(detail.events.filter((event) => event.toStatus !== null).map((e) => e.toStatus)).toEqual(
+      ["created", "picked_up", "in_transit", "out_for_delivery", "delivered"],
+    );
+    // Booking, assignment and four status changes: each bumped the version.
+    expect(detail.shipment.version).toBe(6);
+    expect(detail.shipment.promisedDeliveryAt).not.toBeNull();
+    expect(await unfinishedOf(driver)).toBeDefined();
+
+    // Bookings were announced like any other: created, then the assignment.
+    await realtime.flush();
+    const messages = realtime.about(sample.id);
+    expect(messages.filter((m) => m.kind === "shipment_changed").length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("books at most maxPerTick per tick, and only the gap", async () => {
+    const { dispatcher, driver } = await setUp();
+    const clock = steppingClock();
+    const simulator = createSimulator({
+      drivers: [driver],
+      random: createRandom(9),
+      config: { ...FAST, timeCompression: 1 },
+      clock: clock.now,
+      refill: { dispatcher, target: 5, maxPerTick: 2 },
+    });
+
+    const reports = await runTicks(simulator, clock, 4);
+    // An empty fleet and a target of 5: 2, 2, 1, then nothing (slow trucks, none delivered yet).
+    expect(reports.map((report) => report.booked.length)).toEqual([2, 2, 1, 0]);
+    expect((await unfinishedOf(driver)).length).toBe(5);
+  });
+
+  it("books nothing when the fleet is at target, or without a refill option", async () => {
+    const { dispatcher, driver, first } = await fleetOfOne();
+    const clock = steppingClock();
+    const atTarget = createSimulator({
+      drivers: [driver],
+      random: createRandom(1),
+      config: { ...FAST, timeCompression: 1 },
+      clock: clock.now,
+      refill: { dispatcher, target: 1 },
+    });
+    expect((await atTarget.tick()).booked).toEqual([]);
+
+    const disabled = createSimulator({
+      drivers: [driver],
+      random: createRandom(1),
+      config: FAST,
+      clock: clock.now,
+    });
+    const reports = await runTicks(disabled, clock, 10);
+    expect(reports.flatMap((report) => report.booked)).toEqual([]);
+    expect((await unfinishedOf(driver)).filter((s) => s.id !== first.id)).toEqual([]);
+  });
+
+  it("stops refilling when the office account is refused", async () => {
+    const { driver } = await setUp();
+    const clock = steppingClock();
+    const lines: string[] = [];
+    const simulator = createSimulator({
+      drivers: [driver],
+      random: createRandom(1),
+      clock: clock.now,
+      log: (line) => lines.push(line),
+      // A driver may not book shipments: the service says forbidden.
+      refill: { dispatcher: driver, target: 3 },
+    });
+    expect((await simulator.tick()).booked).toEqual([]);
+    expect(lines.some((line) => line.includes("booking refused: forbidden"))).toBe(true);
   });
 });

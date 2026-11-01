@@ -43,6 +43,13 @@
       "when": 1793469338365,
       "tag": "0005_location_pings",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1793524599704,
+      "tag": "0006_demo_tick_state",
+      "breakpoints": true
     }
   ]
 }
