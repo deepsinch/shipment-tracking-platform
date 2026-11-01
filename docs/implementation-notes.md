@@ -91,7 +91,7 @@ Each checkpoint green and reviewed, like Phase 2. Suggested order (later ones bu
    with exponential backoff and a dead-letter state, HMAC-SHA256 signatures with a timestamp
    (replay window), a delivery log in the UI with "resend". Decide where the worker runs (Vercel Cron
    or a queue) before building.
-3. **Email notifications via Resend.** Customer emails on chosen status changes (recipient email
+3. **[done] Email notifications via Resend.** Customer emails on chosen status changes (recipient email
    already stored), from the same outbox; templates with the public tracking link; idempotency key
    per event; unsubscribe link; test mode without a key in development.
 4. **Proof of delivery.** Photo and signature captured in the driver app on delivery, uploaded to
@@ -804,8 +804,8 @@ decisions 58 to 62; receivers' guide in `docs/api.md` ("Webhooks").
   UI: `/dashboard/settings/webhooks`.
 - **Services must enqueue inside their transaction** (`enqueueShipmentCreated` and friends, next to
   `announceShipmentChange`). A new write path that changes what an event says needs the same call.
-- **Never `await` a delivery in a request.** Use `deliverWebhooksAfterResponse()` after a change and
-  `drainWebhooksOnActivity()` for the throttled heartbeat. They are no-ops outside a Next request
+- **Never `await` a delivery in a request.** Use `deliverOutboxAfterResponse()` after a change and
+  `drainOutboxOnActivity()` for the throttled heartbeat. They are no-ops outside a Next request
   scope (the helper swallows the "outside a request scope" error), so tests and CLI scripts leave
   rows queued; the simulator script and the seed therefore do not deliver webhooks.
 - **A drain claims every due row in the database.** Integration tests that count deliveries park the
@@ -832,6 +832,40 @@ decisions 58 to 62; receivers' guide in `docs/api.md` ("Webhooks").
   log grows); a retry waits for activity or the daily cron, so on a quiet Hobby deployment a 1-minute
   retry may happen hours later (documented in `docs/api.md`); the delivery log does not update live
   (reload to see results).
+
+### Email notifications (Phase 3, checkpoint 3)
+
+Design in `docs/architecture.md` ("Email", "As built (checkpoint 3)"), decisions 63 to 66; enabling
+Resend in `docs/deployment.md`.
+
+- **Where things are.** Pure: `src/domain/{email,unsubscribe-token}.ts`, `src/server/email/templates.ts`.
+  I/O: `src/server/email/{transports,unsubscribe}.ts`, `src/server/services/email-{outbox,delivery,notifications}.ts`.
+  UI: the "Customer emails" card on the shipment page, `/dashboard/settings/email-previews`, public
+  `/unsubscribe/[token]`.
+- **The scheduling helpers were renamed** `deliverOutboxAfterResponse` and `drainOutboxOnActivity`:
+  they now drain webhook deliveries and emails together. New write paths that queue either call them.
+- **Queue inside the transaction, render there too.** `enqueueStatusEmail` runs in
+  `changeShipmentStatus`'s transaction. Add the same call for any new event that should email.
+- **Internal notes cannot reach an email:** `renderStatusEmail`'s input has no such field. Keep it so;
+  the outbox test (internal note never in the stored message) was proven red by passing one in.
+- **Preview is a state of the same row, not a second store.** A queued message becomes `succeeded`
+  with `transport = 'preview'` when the preview transport "sends" it, so previews only list messages
+  that have been drained. In tests call `drainDueEmails(..., { transport: previewTransport })`.
+- **Env:** `RESEND_API_KEY` and `EMAIL_FROM` are validated together (one without the other is an
+  error, except in demo mode where both are ignored). Integration tests rely on `BETTER_AUTH_SECRET`
+  and `BETTER_AUTH_URL` from `.env` (CI writes them) because links and tokens are built from them.
+- **Resend adapter:** plain `fetch`, checked against https://resend.com/docs/api-reference/emails/send-email
+  (header `Idempotency-Key`, 256 characters at most, 24 hours; body `from`, `to`, `subject`, `text`,
+  `html`, `headers`). Never called live from tests or CI; `createResendTransport({ baseUrl })` points at
+  a local fake. Not exercised against the real API from this environment.
+- **Email status on the shipment page does not update live:** the realtime refresh fires at commit,
+  before the message is sent. A reload shows Preview only or Sent.
+- **A drain claims every due email in the database,** like the webhook drain: the delivery tests park
+  other open rows first (`beforeEach`).
+- **Proven red:** internal note leaked into the template, enqueue outside the transaction, no opt-out
+  check at queue time or at send time, and a changing idempotency key each fail their tests.
+- **Mobile navigation:** the Emails link is in the desktop header only; both pages were checked at
+  390 px (no horizontal scroll).
 
 ### Testing
 

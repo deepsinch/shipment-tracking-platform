@@ -744,8 +744,8 @@ LOCKED`, then an UPDATE that counts the attempt and moves `next_attempt_at` two 
   deliver with no transaction open, then record the outcome. The lease is what protects a delivery
   that is mid-request (its row is no longer due); `SKIP LOCKED` is what protects the claim itself
   when drains overlap. Both are proven by tests that fail without them (decision 59).
-- **Where it runs:** `deliverWebhooksAfterResponse()` (an unthrottled `after()` in the actions and
-  routes that change a shipment, and in the demo tick), `drainWebhooksOnActivity()` (a throttled
+- **Where it runs:** `deliverOutboxAfterResponse()` (an unthrottled `after()` in the actions and
+  routes that change a shipment, and in the demo tick), `drainOutboxOnActivity()` (a throttled
   `after()` in the dashboard layout and the authenticated API wrapper) and the daily
   `/api/cron/purge`, which now also calls `drainBacklog()`. No new cron entry, so the Hobby cron
   count is unchanged. Outside a request (tests, CLI scripts) `after()` does not exist and the
@@ -781,6 +781,43 @@ LOCKED`, then an UPDATE that counts the attempt and moves `next_attempt_at` two 
   idempotency key per event, the public tracking link and an unsubscribe link.
 - In demo mode, email never leaves the system: recipients are whatever visitors type, so sending
   would be an abuse vector. Messages go to the stored preview, which is shown in the UI.
+
+#### As built (checkpoint 3)
+
+- **Tables** (migration 0009, additive): `email_messages` (the rendered message, a unique
+  `idempotency_key`, retry state like webhook deliveries, `transport` and `provider_message_id` once
+  handed over; CHECKs tie due time and transport to status) and `email_opt_outs` (primary key
+  organization + address). A sibling of `webhook_deliveries` rather than a second kind inside it
+  (decision 63).
+- **Enqueue** (`email-outbox.ts`): `changeShipmentStatus` calls it inside its transaction. It queues
+  nothing unless the new status is `picked_up`, `out_for_delivery`, `delivered` or `exception`, the
+  shipment has a recipient address and that address has not opted out of the organization. The
+  message is rendered then (`templates.ts`, pure, values escaped, no `dangerouslySetInnerHTML`) and
+  stored as it will be sent. The template takes the event's **public** note only; internal notes are
+  not an input of the function. The idempotency key is `waybill-status-email/<shipment event id>`:
+  unique in the database, so one email per event even if code queued it twice, and the same key on
+  every retry.
+- **Drain** (`email-delivery.ts`): the webhook design again (short claim with `FOR UPDATE SKIP
+LOCKED` and a lease, send with no transaction open, attempts-guarded outcome write, the same pure
+  `transitionAfterAttempt` schedule). It is run by the same hooks as the webhook drain
+  (`deliverOutboxAfterResponse`, `drainOutboxOnActivity`, the daily cron). At send time it checks the
+  opt-out again and ends the message as `suppressed` if the customer left in between.
+- **Transport** (`transports.ts`): `EmailTransport` with a Resend implementation (plain `fetch` to
+  `POST /emails`, `Authorization: Bearer`, `Idempotency-Key`; checked against Resend's current API
+  reference; tested against a local fake server) and a preview implementation that does nothing,
+  because the stored row is the preview. Chosen per drain by `env.email.transport`: Resend only with
+  `RESEND_API_KEY` and `EMAIL_FROM` and demo mode off. Demo mode always previews (decision 52).
+- **Unsubscribe:** the email links to `/unsubscribe/<token>` and carries a `List-Unsubscribe` header.
+  The token is `base64url({org, email}).base64url(HMAC-SHA256)`; the key is derived from
+  `BETTER_AUTH_SECRET` with a fixed label (decision 64). A GET only shows a confirm page (so link
+  scanners cannot unsubscribe anyone); the button posts a Server Action that inserts the opt-out.
+  The page is public, `noindex` and disallowed in `robots.txt`, and shows a masked address.
+- **Staff UI:** the shipment page shows each message as Queued, Sent, Preview only, Failed, or
+  Opted out for the customer. Admins read previews at `/dashboard/settings/email-previews`, as the
+  text version only (decision 65).
+- **Not done on purpose:** no bounce or complaint handling (needs Resend webhooks), no HTML preview,
+  no per-organization sender or templates, no emails for `created`, `in_transit` or `cancelled`, no
+  RFC 8058 one-click POST header, no live refresh of the email status on the shipment page.
 
 ### Proof of delivery
 
@@ -867,3 +904,7 @@ LOCKED`, then an UPDATE that counts the attempt and moves `next_attempt_at` two 
 | 60  | Resend inserts a new delivery; the original stays as it was                                                                                   | The log keeps what happened, and the event id (not the delivery id) is what receivers deduplicate on                                                                                                                                                                                                                                                                                        | Resetting the old row to `pending` (loses the failure history)                                                                                                                                                                                                                                        |
 | 61  | Webhook payloads omit internal notes; drivers appear by name only                                                                             | Webhooks often feed chat tools or third parties; "internal" means inside the company, and user ids are never part of an outward contract                                                                                                                                                                                                                                                    | Reusing the API event projection as is (it includes internal notes for keys, which act as staff)                                                                                                                                                                                                      |
 | 62  | An endpoint is switched off after five dead deliveries in a row                                                                               | A receiver that is gone should stop costing six attempts per event; an admin sees the reason and re-enables it                                                                                                                                                                                                                                                                              | Never disabling (unbounded wasted work); disabling on the first dead delivery (one bad event would silence a healthy receiver)                                                                                                                                                                        |
+| 63  | Customer emails get their own table (`email_messages`), drained by the same hooks, instead of a second kind in `webhook_deliveries`           | The columns that matter differ (recipient, subject, bodies, provider id, no endpoint) and a drain should never need to see the other kind's rows; the state machine, claim pattern and hooks are shared                                                                                                                                                                                     | A `kind` column with nullable columns for each kind (weaker CHECKs); a generic outbox with a JSON payload (no constraints, no indexes per kind)                                                                                                                                                       |
+| 64  | The unsubscribe token's key is derived from `BETTER_AUTH_SECRET` (HMAC with a fixed label), not a new `EMAIL_TOKEN_SECRET`                    | One less secret for the owner to set and leak; domain separation means the auth secret itself never signs a link; rotation already signs everyone out                                                                                                                                                                                                                                       | A separate secret (cleaner rotation, one more variable); storing a random token per recipient (a lookup, but revocable and no secret)                                                                                                                                                                 |
+| 65  | Email previews show the text version only                                                                                                     | The HTML is stored and sent, but rendering stored markup in the dashboard, or in a sandboxed `srcdoc` frame, would need the CSP loosened for little gain; the text carries the same content and cannot run anything                                                                                                                                                                         | A sandboxed iframe (needs `frame-src`/`child-src` changes); rendering the HTML directly (banned)                                                                                                                                                                                                      |
+| 66  | Opt-outs are per organization and address and are checked when queueing and again when sending                                                | Covers the customer's future shipments, never crosses carriers, and honours an unsubscribe that happens while a message is queued                                                                                                                                                                                                                                                           | Per shipment (does not cover new shipments); checking only at queue time                                                                                                                                                                                                                              |

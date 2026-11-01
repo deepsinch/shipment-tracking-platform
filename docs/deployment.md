@@ -187,6 +187,33 @@ The README's "Live demo" link already points at the production URL; change it if
    `https://waybill.example.com` (Production only), and **Redeploy**. The app still accepts
    requests on the `*.vercel.app` addresses too.
 
+## Turning on real customer emails (optional)
+
+Out of the box, and always in demo mode, customer emails are **not sent**: each one is stored and
+shown to admins under **Emails** in the dashboard, exactly as it would have been sent. To send them
+for real (on a deployment that is not in demo mode), use Resend:
+
+1. Create a Resend account and an **API key** (Resend dashboard, API Keys). Switch on "Sensitive" when
+   you add it in Vercel.
+2. Choose a sender. To try it, Resend's shared test sender `onboarding@resend.dev` works, but Resend
+   only delivers from it to the address of your own Resend account. For real customers, add and verify
+   your own domain in Resend (it asks for DNS records) and send from an address on it.
+3. In Vercel add two environment variables (Production, and Preview if you want it there):
+
+   | Key              | Value                                                                             |
+   | ---------------- | --------------------------------------------------------------------------------- |
+   | `RESEND_API_KEY` | the Resend API key (starts with `re_`)                                            |
+   | `EMAIL_FROM`     | `Waybill <notifications@your-domain>` (or `Name <onboarding@resend.dev>` to test) |
+
+4. Redeploy. No code change is needed; setting only one of the two is a startup error that names the
+   missing one. With `DEMO_MODE=true` both are ignored on purpose.
+
+Emails use the app's own address for the tracking and unsubscribe links (the same address Better Auth
+uses, see "Custom domain"). Failed sends are retried like webhooks (1 minute to 6 hours), and each
+message carries an idempotency key, so a retry never sends a duplicate. The unsubscribe links are
+signed with a key derived from `BETTER_AUTH_SECRET`: rotating that secret invalidates links in
+emails already sent.
+
 ## Turning demo mode off
 
 Demo mode is a deployment setting. To switch it off:
