@@ -10,7 +10,7 @@ import { canManageApiKeys } from "@/domain/api-keys";
 import { ROLE_LABELS } from "@/domain/roles";
 import { canManageWebhooks } from "@/domain/webhooks";
 import { getCurrentUser, requireAuthContextOn } from "@/server/auth/session";
-import { drainWebhooksOnActivity } from "@/server/webhooks/schedule";
+import { drainOutboxOnActivity } from "@/server/webhooks/schedule";
 
 import { signOutAction } from "../(auth)/actions";
 
@@ -33,7 +33,7 @@ async function AuthenticatedShell({ children }: { children: React.ReactNode }) {
   const context = await requireAuthContextOn("/dashboard");
   const user = await getCurrentUser();
   // Staff opening the dashboard doubles as the heartbeat that retries due webhooks (throttled).
-  drainWebhooksOnActivity();
+  drainOutboxOnActivity();
 
   return (
     <RealtimeProvider>

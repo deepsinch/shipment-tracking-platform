@@ -20,6 +20,7 @@ import {
 } from "./results";
 import { announceShipmentChange } from "./realtime-signals";
 import { visibleShipments } from "./shipment-access";
+import { enqueueStatusEmail } from "./email-outbox";
 import { enqueueStatusChanged } from "./webhook-outbox";
 import { blankToUndefined, optionalCoordinate, optionalText } from "./validation";
 
@@ -166,6 +167,7 @@ export async function changeShipmentStatus(
       .returning();
     await announceShipmentChange(tx, updated, "status");
     await enqueueStatusChanged(tx, updated, event!);
+    await enqueueStatusEmail(tx, updated, event!);
 
     return { ok: true, shipment: updated, event: event! };
   });

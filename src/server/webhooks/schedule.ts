@@ -2,12 +2,13 @@ import "server-only";
 
 import { after } from "next/server";
 
+import { drainDueEmails } from "@/server/services/email-delivery";
 import { drainDueDeliveries } from "@/server/services/webhook-delivery";
 
 import { claimWebhookDrain } from "./drain-throttle";
 
 /**
- * Hooks that make webhook delivery happen on a host without a worker: both run through Next's
+ * Hooks that make outbound delivery (webhooks, customer emails) happen on a host without a worker: both run through Next's
  * `after()`, i.e. once the response has been sent, so the user never waits for a receiver.
  *
  * Outside a request (tests that call a handler directly, the CLI scripts) there is no `after()`
@@ -20,7 +21,7 @@ function afterResponse(task: () => Promise<unknown>): void {
     try {
       await task();
     } catch (error) {
-      console.error("Webhook drain failed", error);
+      console.error("Outbox drain failed", error);
     }
   };
   try {
@@ -30,17 +31,25 @@ function afterResponse(task: () => Promise<unknown>): void {
   }
 }
 
-/** First attempt: call after a change that may have queued webhooks, once its response is sent. */
-export function deliverWebhooksAfterResponse(): void {
-  afterResponse(() => drainDueDeliveries());
+/** Everything the outbox holds: webhook deliveries and customer emails, each drain independent. */
+async function drainOutbox(): Promise<void> {
+  await Promise.all([drainDueDeliveries(), drainDueEmails()]);
+}
+
+/**
+ * First attempt: call after a change that may have queued webhooks or an email, once its
+ * response is sent.
+ */
+export function deliverOutboxAfterResponse(): void {
+  afterResponse(drainOutbox);
 }
 
 /**
  * Retries: call on ordinary app and API activity. At most one drain per 30 seconds runs, whoever
  * asks (`claimWebhookDrain`), so a busy API does not turn into a busy drain.
  */
-export function drainWebhooksOnActivity(): void {
+export function drainOutboxOnActivity(): void {
   afterResponse(async () => {
-    if (await claimWebhookDrain()) await drainDueDeliveries();
+    if (await claimWebhookDrain()) await drainOutbox();
   });
 }

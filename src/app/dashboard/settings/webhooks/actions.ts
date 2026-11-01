@@ -11,7 +11,7 @@ import {
   rotateWebhookSecret,
   setWebhookEndpointEnabled,
 } from "@/server/services/webhook-endpoints";
-import { deliverWebhooksAfterResponse } from "@/server/webhooks/schedule";
+import { deliverOutboxAfterResponse } from "@/server/webhooks/schedule";
 
 /**
  * Thin wiring between the webhooks page and the endpoint services, which own authorization and
@@ -86,7 +86,7 @@ export async function setWebhookEnabledAction(
   revalidatePath(WEBHOOKS_PATH);
 
   if (result.ok) {
-    if (enabled) deliverWebhooksAfterResponse();
+    if (enabled) deliverOutboxAfterResponse();
     return { outcome: "updated", message: enabled ? "Webhook enabled." : "Webhook disabled." };
   }
   return result.reason === "forbidden" ? ADMINS_ONLY : GONE;
@@ -118,7 +118,7 @@ export async function resendDeliveryAction(
   revalidatePath(WEBHOOKS_PATH);
 
   if (result.ok) {
-    deliverWebhooksAfterResponse();
+    deliverOutboxAfterResponse();
     return { outcome: "updated", message: "Queued again. Refresh in a moment to see the result." };
   }
   switch (result.reason) {

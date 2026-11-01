@@ -5,7 +5,7 @@ import type { AuthContext } from "@/server/auth/auth-context";
 import { clientIp } from "@/server/auth/client-ip";
 import { consumeRateLimit, RATE_LIMITS } from "@/server/auth/rate-limit";
 import { authenticateApiKey } from "@/server/services/api-keys";
-import { drainWebhooksOnActivity } from "@/server/webhooks/schedule";
+import { drainOutboxOnActivity } from "@/server/webhooks/schedule";
 import type { FieldErrors } from "@/server/services/results";
 
 import { problemResponse, rateLimitedResponse } from "./problem";
@@ -41,7 +41,7 @@ export function apiRoute<Params = Record<string, never>>(
       );
       if (!identity) return await unauthorized(request);
       // Authenticated API traffic doubles as the heartbeat that retries due webhooks (throttled).
-      drainWebhooksOnActivity();
+      drainOutboxOnActivity();
 
       const limit = await consumeRateLimit(RATE_LIMITS.apiPerKey, identity.keyId);
       if (limit.limited) return rateLimitedResponse(limit.retryAfterMs);

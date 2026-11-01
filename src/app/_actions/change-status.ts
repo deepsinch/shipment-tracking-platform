@@ -9,7 +9,7 @@ import { dateTimeLocalAsUtc, formValues, type SubmittedValues } from "@/lib/form
 import { requireAuthContext } from "@/server/auth/session";
 import { changeShipmentStatus } from "@/server/services/change-shipment-status";
 import type { FieldErrors } from "@/server/services/results";
-import { deliverWebhooksAfterResponse } from "@/server/webhooks/schedule";
+import { deliverOutboxAfterResponse } from "@/server/webhooks/schedule";
 
 /**
  * The status change action, shared by the dashboard's detail page and the driver app. The service
@@ -53,7 +53,7 @@ export async function changeStatusAction(
   });
 
   if (result.ok) {
-    deliverWebhooksAfterResponse();
+    deliverOutboxAfterResponse();
     revalidateShipment(shipmentId);
     return {
       outcome: "updated",

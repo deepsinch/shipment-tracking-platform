@@ -1,6 +1,7 @@
 import { isCronAuthorized } from "@/server/demo/cron-auth";
 import { env } from "@/server/env";
 import { purgeExpiredData } from "@/server/services/purge-expired-data";
+import { drainEmailBacklog } from "@/server/services/email-delivery";
 import { drainBacklog } from "@/server/services/webhook-delivery";
 
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -20,5 +21,6 @@ export async function GET(request: Request): Promise<Response> {
   // The daily backstop for webhooks: retries that no activity picked up, such as the 6-hour step
   // of the backoff on a quiet night. Hobby allows daily crons only, hence the shared route.
   const webhooks = await drainBacklog();
-  return Response.json({ status: "purged", ...purged, webhooks }, { headers: NO_STORE });
+  const emails = await drainEmailBacklog();
+  return Response.json({ status: "purged", ...purged, webhooks, emails }, { headers: NO_STORE });
 }
