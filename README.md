@@ -50,8 +50,15 @@ nightly reset) is code in this repository, described in [docs/deployment.md](doc
 - **Truck simulator** (`pnpm simulate`): drives the demo trucks along those roads as their driver,
   through the same rules as a real phone, so the map moves, and books replacements when they run low.
 
-Next up (Phase 3): a public API, webhooks, email notifications, proof of delivery and AI intake of
-shipment requests (see the roadmap in [docs/implementation-notes.md](docs/implementation-notes.md)).
+## Features (Phase 3: integrations)
+
+- **Public API** (`/api/v1`): API keys created by admins (shown once, stored as a hash), scoped
+  read and write access to shipments, `ETag` / `If-Match` so integrations get the same lost-update
+  protection as the forms, RFC 9457 errors, per-key rate limits and an OpenAPI 3.1 document. See
+  [docs/api.md](docs/api.md).
+
+Next up (Phase 3): webhooks, email notifications, proof of delivery and AI intake of shipment
+requests (see the roadmap in [docs/implementation-notes.md](docs/implementation-notes.md)).
 
 ## Stack
 
@@ -159,6 +166,7 @@ The seed runs once (a re-run is a no-op, because history is never deleted). For 
 ## Documentation
 
 - [Deployment guide](docs/deployment.md): click-by-click Vercel + Neon setup, demo mode, troubleshooting.
+- [API guide](docs/api.md): API keys, endpoints, ETag and If-Match, error format, rate limits.
 - [Architecture](docs/architecture.md): system design, state machine, multi-tenancy, decisions log.
 - [Engineering notes](docs/engineering-notes.md): the problems worth discussing and the tradeoffs.
 - [Implementation notes](docs/implementation-notes.md): status, roadmap, gotchas, environment.

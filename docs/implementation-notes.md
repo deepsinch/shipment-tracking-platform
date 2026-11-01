@@ -77,13 +77,15 @@ by checkpoint (design and as-built notes in `docs/architecture.md`, "Phase 2: li
 
 Each checkpoint green and reviewed, like Phase 2. Suggested order (later ones build on earlier):
 
-1. **Public API with API keys.** `api_keys` table (hashed key, prefix for display, organization,
-   scopes, last used, revoked), admin UI to create and revoke (shown once). Route handlers under
-   `/api/v1` (list, get, create shipments; change status) over the existing services, with an
-   `AuthContext` for the key. Zod at the boundary, explicit response projections with key-set tests,
-   per-key rate limits (decision 11's counters). Concurrency over HTTP: `ETag` = shipment version,
-   `If-Match` required on status changes (`412` on mismatch, `428` without), so API clients get the
-   same lost-update protection as forms. OpenAPI document.
+1. **[done] Public API with API keys.** `api_keys` table (migration 0007: hashed key, display
+   prefix, organization, scopes with CHECKs, creator, last used, revoked), key services, admin UI
+   at `/dashboard/settings/api-keys` (shown once, revoke with confirm), route handlers under
+   `/api/v1` (list, get, create shipments; change status; public tracking) over the existing
+   services with an `api` `AuthContext`. Explicit projections with key-set tests, RFC 9457 errors,
+   per-key and per-IP rate limits (decision 11's counters), `ETag` = shipment version and
+   `If-Match` required on status changes (`412` / `428`), a hand-written OpenAPI 3.1 document at
+   `/api/v1/openapi.json`, and `docs/api.md`. Design and decisions 53 to 57 in
+   `docs/architecture.md`.
 2. **Signed, retried webhooks.** Endpoints per organization (URL, secret, event types), an outbox
    table written in the same transaction as the change (like `pg_notify` today), a delivery worker
    with exponential backoff and a dead-letter state, HMAC-SHA256 signatures with a timestamp
@@ -763,6 +765,33 @@ import.meta.url).href)` makes Turbopack emit the worker to `/_next/static/media/
   scheme; `CRON_SECRET` arrives as `Authorization: Bearer …`; Neon's `DATABASE_URL` is pooled,
   `DATABASE_URL_UNPOOLED` direct; previews get branch `preview/<git-branch>`.
 - **Still the owner's job:** the dashboard steps (the README already links the live demo).
+
+### Public API (Phase 3, checkpoint 1)
+
+- **`api` is not a member role.** `ROLES` / `Role` are what Better Auth stores; `ActorRole`
+  (`Role | "api"`) is what `AuthContext.role` and the permission functions take. Server-side
+  session helpers return `MemberAuthContext` (`role: Role`) so `homePathFor` and `ROLE_LABELS`
+  stay total. If you add a permission function, add the `api` row to its test (the tests are
+  `Record<ActorRole, ...>`, so a missing row is a type error).
+- **Events made through the API are attributed to the key's creating admin** (the context's
+  `userId`), so the history shows that admin's name. Decision 54 records the alternative.
+- **Route files may only export handlers** (Next rejects other exports), so shared constants live
+  in `src/server/api/` (`request-fields.ts`), which the OpenAPI test imports.
+- **Route handlers are tested by calling them** with a constructed `Request` and
+  `{ params: Promise.resolve(...) }`, like `app/api/realtime`. The helper lives in
+  `src/app/api/v1/api.integration.test.ts`. Give every call its own random `x-forwarded-for`, or
+  one test's failed-key attempts count against the next test's per-IP limit.
+- **The forced race over HTTP** uses two keys so the two requests do not queue on one rate-limit
+  counter (it would be a second lock to wait on); only the held shipment row blocks them.
+- **A CHECK cannot take bind parameters**, so the scopes CHECK is emitted from the `API_SCOPES`
+  constant as a literal array (`sql.raw`). Adding a scope later means a migration that replaces
+  `api_keys_scopes_known`.
+- **`drizzle-kit` names migrations randomly**; rename the SQL file and the `tag` in
+  `meta/_journal.json` together (0007 is `0007_api_keys`).
+- **Mobile navigation:** the dashboard header nav is hidden below `sm`, so the API keys link, like
+  Live map, is desktop-only; the page itself works at 390px.
+- **Not done on purpose:** no CORS (server-to-server API), no key rotation or expiry, no per-key
+  event attribution, no audit log of key use beyond `last_used_at` (minute granularity).
 
 ### Testing
 

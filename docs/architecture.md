@@ -680,6 +680,32 @@ Adding the key in Vercel turns a feature on with no code change.
   (`428` without it, `412` on a mismatch).
 - Per-key rate limits reuse the Postgres fixed-window counters (decision 11).
 
+#### As built (checkpoint 1)
+
+- **Roles.** `ROLES` stays the three member roles (they are what Better Auth stores and what
+  `isRole` accepts). `api` is `API_ROLE`, and `ActorRole = Role | "api"` is the type of
+  `AuthContext.role`, so the permission functions accept it and a `Record<ActorRole, ...>` test
+  restates every rule for it. Pages and sign-in keep `MemberAuthContext` (`role: Role`), so they
+  can still pick a home path or a label without handling `api`. The access-control and
+  organization config never mention `api`.
+- **Authentication** (`authenticateApiKey`): bearer token, shape check, then a lookup of its
+  SHA-256 in the unique `key_hash` index, revoked keys excluded. No constant-time comparison is
+  needed: the stored secret is never compared with the presented one, the database matches
+  hashes, and an attacker cannot steer a SHA-256 output. The context acts as the key's creator
+  (`createdBy`) with role `api`. `last_used_at` is written at most once a minute (a read-side
+  check plus a conditional UPDATE).
+- **HTTP edge** (`src/server/api/`): `apiRoute(scope, handler)` runs, in order, key lookup (401,
+  failures counted per client IP, 429 when exceeded), per-key limit (120 per minute, 429), scope
+  check (403), then the handler; handlers only translate HTTP to a service call and back.
+  `problemFromFailure` maps each service result kind with an exhaustive `switch`.
+- **Contract.** Projections are in `projections.ts`; key sets are asserted by integration tests and
+  compared with the OpenAPI document by `openapi.test.ts`, which also checks that every route file
+  has an operation (and the reverse) and that every `$ref` resolves.
+- **Strictness.** Request bodies reject unknown fields (the services' Zod schemas strip them,
+  which suits forms). `assignedDriverId` is not accepted: it would expose user ids.
+- **Public tracking** through the API reuses `getPublicTracking` and is limited per client IP
+  (60 per minute), since there is no key to count against.
+
 ### Webhooks without a long-running worker
 
 - Changes write an outbox row in the same transaction (like `pg_notify`), so a delivery exists only
@@ -779,3 +805,8 @@ Adding the key in Vercel turns a feature on with no code change.
 | 50  | Webhook outbox with an after() first attempt and throttled activity-driven retries                                                            | Delivery exists only if the change committed; works on Hobby without a worker or per-minute cron                                                                                                                                                        | A worker process; per-minute cron (paid); a hosted queue now (kept as the scale path)                                                                                                                                                                                                                 |
 | 51  | Webhook SSRF guard at delivery time                                                                                                           | Blocks private, loopback, link-local and metadata IPs even after DNS rebinding                                                                                                                                                                          | Validating the URL only when it is saved                                                                                                                                                                                                                                                              |
 | 52  | No real email and no visitor uploads in demo mode                                                                                             | Visitor-typed recipients and files are abuse vectors on a public demo                                                                                                                                                                                   | Rate limits alone                                                                                                                                                                                                                                                                                     |
+| 53  | `api` is a synthetic `ActorRole`, not a member role; `AuthContext.role` is `ActorRole`, session helpers return `MemberAuthContext`            | An API key gets exactly a dispatcher's rules through the same services; Better Auth and the member roles stay untouched; pages cannot meet `api`                                                                                                        | Adding `api` to `ROLES` (it would be assignable as a member role); a separate permission model for keys                                                                                                                                                                                               |
+| 54  | API changes are attributed to the key's creating admin; keys do not record which key acted                                                    | History needs a real user (FK) and no schema change to events; the key list shows who made each key                                                                                                                                                     | A nullable `api_key_id` on events and an actor label in the UI (the scale path, once keys are shared)                                                                                                                                                                                                 |
+| 55  | Hand-written OpenAPI 3.1 guarded by tests, not generated from the Zod schemas                                                                 | The services' schemas are form schemas (coercion, trimming); the contract is the handlers and projections. Tests catch drift                                                                                                                            | `z.toJSONSchema` (publishes form quirks, cannot express the preprocess steps); a generator library                                                                                                                                                                                                    |
+| 56  | `ETag` is the shipment version; `If-Match` is required on status changes (428 / 412 / 400 for malformed)                                      | Same lost-update protection as the forms; no silent last-write-wins for integrations                                                                                                                                                                    | Optional `If-Match`; a version field in the body only                                                                                                                                                                                                                                                 |
+| 57  | Rate limits: per key, plus per IP for requests without a valid key and for public tracking; only failures count toward the IP                 | A runaway integration cannot starve others; guessing is throttled; a valid key behind a shared IP is never blocked by others' mistakes                                                                                                                  | A per-IP limit on every request; in-memory counters (reset on every cold start)                                                                                                                                                                                                                       |
