@@ -2,8 +2,10 @@ import { execFile } from "node:child_process";
 import { randomInt } from "node:crypto";
 import { promisify } from "node:util";
 
-import { expect, test } from "./fixtures";
-import { recordCspViolations } from "./helpers";
+import type { Page } from "@playwright/test";
+
+import { blockMapTiles, expect, test } from "./fixtures";
+import { readPosition, recordCspViolations } from "./helpers";
 
 /**
  * Demo mode (`DEMO_MODE=true`), served by the second web server of playwright.config.ts (project
@@ -120,3 +122,103 @@ test("the live map asks the server to move the trucks while it is open", async (
   expect(await response.json()).toMatchObject({ ran: true });
   expect(violations).toEqual([]);
 });
+
+test("the demo driver shares a simulated position and the browser's geolocation is never used", async ({
+  browser,
+  baseURL,
+}) => {
+  // The visitor's phone, in Delhi, with location permission granted: if the app asked for it at
+  // all, it would get this position.
+  const DELHI = { latitude: 28.6139, longitude: 77.209, accuracy: 5 };
+  const phoneContext = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    baseURL,
+    extraHTTPHeaders: { "x-forwarded-for": `203.0.113.${randomInt(1, 255)}` },
+  });
+  await blockMapTiles(phoneContext);
+  await phoneContext.grantPermissions(["geolocation"]);
+  await phoneContext.setGeolocation(DELHI);
+  // Any touch of navigator.geolocation (even reading the property) is recorded, and using it fails.
+  await phoneContext.addInitScript(() => {
+    const uses: string[] = [];
+    Object.assign(window, { __geolocationUses: uses });
+    const forbidden = (name: string) => () => {
+      uses.push(name);
+      throw new Error(`navigator.geolocation.${name} must not be used in demo mode`);
+    };
+    Object.defineProperty(navigator, "geolocation", {
+      configurable: true,
+      get() {
+        uses.push("get");
+        return {
+          getCurrentPosition: forbidden("getCurrentPosition"),
+          watchPosition: forbidden("watchPosition"),
+          clearWatch: forbidden("clearWatch"),
+        };
+      },
+    });
+  });
+  const phone = await phoneContext.newPage();
+  const violations = await recordCspViolations(phoneContext);
+
+  await phone.goto("/sign-in");
+  await phone
+    .getByTestId("demo-sign-in")
+    .getByRole("button", { name: /Sign in as driver/ })
+    .click();
+  await expect(phone).toHaveURL(/\/driver$/);
+  await phone
+    .getByRole("link")
+    .filter({ hasText: /In transit|Out for delivery|Picked up/ })
+    .first()
+    .click();
+  const heading = phone.getByRole("heading", { level: 1, name: /^WB-[0-9A-Z]{4}-[0-9A-Z]{4}$/ });
+  await expect(heading).toBeVisible();
+  const trackingCode = (await heading.textContent())!.trim();
+
+  // The copy is there before anything is switched on.
+  const note = phone.getByTestId("demo-location-note");
+  await expect(note).toHaveText(
+    "Demo: a simulated position along the route is shared. Your real location is never used.",
+  );
+  const toggle = phone.getByRole("switch", { name: /Share my location/ });
+  await expect(toggle).not.toBeChecked();
+
+  await toggle.click();
+  await expect(toggle).toBeChecked();
+  // A ping went through (the map's 12 s tick may have used the throttle window just before, in
+  // which case the sharer sends again in the next one).
+  await expect(phone.getByTestId("location-status")).toContainText(
+    /Sharing simulated location · last sent/,
+    { timeout: 25_000 },
+  );
+
+  // Stored: a position on the route, nowhere near the browser's.
+  const stored = await readPosition(trackingCode, DEMO_DATABASE_URL);
+  expect(stored).not.toBeNull();
+  expect(stored!.accuracyM).toBe(10); // the simulator's, not the device's (5)
+  expect(distanceKm(stored!, { lat: DELHI.latitude, lng: DELHI.longitude })).toBeGreaterThan(1000);
+
+  // No permission prompt, no call, not even a look at the property; and the CSP is happy.
+  expect(await geolocationUses(phone)).toEqual([]);
+  expect(violations).toEqual([]);
+
+  await toggle.click();
+  await expect(toggle).not.toBeChecked();
+  expect(await geolocationUses(phone)).toEqual([]);
+
+  await phoneContext.close();
+});
+
+/** What the page's init script recorded: every touch of `navigator.geolocation`. */
+const geolocationUses = (page: Page) =>
+  page.evaluate(() => (window as unknown as { __geolocationUses: string[] }).__geolocationUses);
+
+/** Great-circle distance in kilometres (haversine), enough to tell Delhi from the Benelux. */
+function distanceKm(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
+  const rad = (degrees: number) => (degrees * Math.PI) / 180;
+  const h =
+    Math.sin(rad(b.lat - a.lat) / 2) ** 2 +
+    Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(rad(b.lng - a.lng) / 2) ** 2;
+  return 2 * 6371 * Math.asin(Math.sqrt(h));
+}

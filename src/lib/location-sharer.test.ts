@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  createSimulatedPositionSource,
   PERMISSION_DENIED_NOTICE,
   startLocationSharing,
   UNAVAILABLE_PROBLEM,
@@ -207,5 +208,77 @@ describe("startLocationSharing", () => {
     reply = async () => ({ status: "sent" });
     await vi.advanceTimersByTimeAsync(INTERVAL);
     expect(sent.map((fix) => fix.lat)).toEqual([51.0, 51.0, 51.1, 51.2]);
+  });
+});
+
+describe("createSimulatedPositionSource", () => {
+  beforeEach(() => vi.useFakeTimers({ now: new Date("2026-10-31T12:00:00Z") }));
+  afterEach(() => vi.useRealTimers());
+
+  it("never reads the real geolocation, however sharing runs", async () => {
+    const real = vi.fn(() => {
+      throw new Error("navigator.geolocation must not be used in the demo");
+    });
+    vi.stubGlobal("navigator", {
+      get geolocation() {
+        return real();
+      },
+    });
+    try {
+      const sent: Fix[] = [];
+      const sharing = startLocationSharing({
+        geolocation: createSimulatedPositionSource({ beatMs: 5_000 }),
+        send: async (fix) => {
+          sent.push(fix);
+          return { status: "sent" };
+        },
+        onChange: () => {},
+        intervalMs: INTERVAL,
+      });
+      await vi.advanceTimersByTimeAsync(25_000);
+      sharing.stop();
+
+      expect(sent.length).toBeGreaterThanOrEqual(2);
+      expect(real).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("delivers the first position right after the watch starts, then on every beat", async () => {
+    const positions: number[] = [];
+    const source = createSimulatedPositionSource({ beatMs: 5_000 });
+    source.watchPosition((position) => positions.push(position.timestamp));
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(positions).toEqual([Date.now()]);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(positions).toHaveLength(3);
+  });
+
+  it("stops delivering once the watch is cleared, even before the first position", async () => {
+    const onPosition = vi.fn();
+    const source = createSimulatedPositionSource({ beatMs: 5_000 });
+    const id = source.watchPosition(onPosition);
+    source.clearWatch(id);
+
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(onPosition).not.toHaveBeenCalled();
+  });
+
+  it("sends the sharer's usual schedule: one send per interval", async () => {
+    const send = vi.fn(async (): Promise<SendOutcome> => ({ status: "sent" }));
+    const sharing = startLocationSharing({
+      geolocation: createSimulatedPositionSource({ beatMs: 5_000 }),
+      send,
+      onChange: () => {},
+      intervalMs: INTERVAL,
+    });
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(send).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(INTERVAL);
+    expect(send).toHaveBeenCalledTimes(2);
+    sharing.stop();
   });
 });
