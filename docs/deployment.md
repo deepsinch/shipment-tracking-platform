@@ -17,7 +17,7 @@ Tick these off as you go. Each item is explained in the numbered steps below.
 - [ ] 2. Neon account created (optional but useful: it lets you look inside the database)
 - [ ] 3. GitHub repository imported as a Vercel project (do not click Deploy yet)
 - [ ] 4. Neon added from the Vercel Marketplace, connected to the project, preview branching on
-- [ ] 5. Name of the Neon database noted (usually `neondb`)
+- [ ] 5. Name of the Postgres database noted (the last part of the connection string)
 - [ ] 6. `BETTER_AUTH_SECRET` generated and added in Vercel
 - [ ] 7. `CRON_SECRET` generated and added in Vercel
 - [ ] 8. `DEMO_MODE=true` and `DEMO_RESET_DATABASES=<database name>` added in Vercel
@@ -68,22 +68,29 @@ Tick these off as you go. Each item is explained in the numbered steps below.
 
 ## 3. Add Neon from the Marketplace
 
-1. In the Vercel project (or the team dashboard) open **Storage**, click **Create Database** (or
-   **Browse Marketplace**) and choose **Neon** (Postgres).
-2. Accept the terms, choose the free plan, pick a region close to your Vercel functions (the
-   default Vercel region is Washington, D.C., `iad1`, so a US East region), and give the database
-   a name.
-3. When asked which project to connect, pick the Waybill project and tick **Production** and
-   **Preview** (leave Development unticked).
-4. Find the option to **create a database branch for each preview deployment** (named something
-   like "Preview branches" / "Create a branch for each preview deployment") and turn it on. Each
-   pull request then gets its own copy of the database, so previews never touch production data.
-5. Finish. Open the project's **Settings → Environment Variables** and check that `DATABASE_URL`
-   and `DATABASE_URL_UNPOOLED` now exist. Do not edit them.
+1. Open the [Neon integration on the Vercel Marketplace](https://vercel.com/marketplace/neon) (or
+   the project's **Storage** tab) and click **Install**. In the **Install Neon** dialog choose
+   **Create New Neon Account** and **Continue** (this is the Vercel-managed integration: one bill,
+   in Vercel).
+2. Under **Configuration and Plan**, pick a region close to your Vercel functions (the default
+   Vercel region is Washington, D.C., `iad1`, so a US East region). Leave the optional **Auth** and
+   **Realtime** services off: Waybill brings its own auth and realtime. Choose the free plan,
+   accept the terms and name the database. (A "Database" in Vercel is a **Project** in Neon, so
+   this name is not the Postgres database name you need in step 5.)
+3. In **Storage → your database → Connect Project**, choose the Waybill project and the
+   **Environments** **Production** and **Preview** (Development is not needed).
+4. Under **Create database branch for deployment**, tick **Preview** and leave **Production**
+   unticked. Each preview deployment then gets its own copy of the database, so previews never
+   touch production data.
+5. Leave **Custom Prefix** empty: the app expects the unprefixed `DATABASE_URL` and
+   `DATABASE_URL_UNPOOLED`.
+6. Open the project's **Settings → Environment Variables** and check that `DATABASE_URL` and
+   `DATABASE_URL_UNPOOLED` now exist. Do not edit them.
 
 Note the **database name**: it is the last part of the connection string, after the host and
 before any `?`. In Neon's console it is under your project, **Branches → Databases** (or the
-**Dashboard**'s connection details). With the integration it is usually `neondb`. You need it in
+**Dashboard**'s connection details). Neon commonly names it `neondb`, but use what your connection
+string shows. You need it in
 step 5 below. (If you guess wrong, nothing is lost: the deploy stops with the exact name in the
 message, see Troubleshooting.)
 
@@ -116,7 +123,7 @@ shows the value again.
 | `BETTER_AUTH_SECRET`      | the output of the first command (44 characters)            | Signs session cookies. Changing it later signs everyone out.                                                                                                    |
 | `DEMO_MODE`               | `true`                                                     | Turns on the banner, the one-click demo sign-in, the moving trucks and the nightly reset, and creates the demo data on deploy.                                  |
 | `CRON_SECRET`             | the output of the second command (64 characters)           | Vercel Cron sends it as `Authorization: Bearer …` to the reset endpoint, which refuses everything else. Required when `DEMO_MODE=true`, at least 16 characters. |
-| `DEMO_RESET_DATABASES`    | the database name from step 3, e.g. `neondb`               | The nightly reset may only wipe a database named here, so it can never hit one you did not mean. Required when `DEMO_MODE=true`.                                |
+| `DEMO_RESET_DATABASES`    | the database name from step 3 (often `neondb`)             | The nightly reset may only wipe a database named here, so it can never hit one you did not mean. Required when `DEMO_MODE=true`.                                |
 | `BETTER_AUTH_URL`         | _leave unset_ (set it only for a custom domain, see below) | On Vercel the app's address is worked out from the deployment, for production and for every preview.                                                            |
 | `REALTIME_STREAM_SECONDS` | _leave unset_                                              | Only needed if your plan's function time limit is under 300 seconds.                                                                                            |
 
@@ -256,7 +263,8 @@ database afterwards.
 
 ## Plan limits worth knowing
 
-- **Vercel Hobby:** daily cron jobs only, with timing precision of an hour; functions may run up
+- **Vercel Hobby:** up to 100 cron jobs per project, each at most once a day, run at any time
+  within the scheduled hour (±59 minutes); functions may run up
   to 300 seconds with Fluid compute, which the live-update stream relies on (it closes itself
   after 270 seconds and the browser reconnects). Hobby is for non-commercial use.
 - **Neon free plan:** the database suspends when idle, so the first request after a quiet period is
@@ -266,22 +274,19 @@ database afterwards.
 
 ## Sources
 
-Checked on 2026-11-01. Read this note before trusting the list: while writing this guide the
-build environment could not reach `vercel.com` or `neon.com` (DNS lookups for both hosts failed,
-`getaddrinfo ENOTFOUND`), so **the pages could not be opened directly**. The statements below come
-from the search engine's summaries of these pages and agree with how the code behaves when run
-locally; verify the starred ones in the live docs before relying on them.
+Checked against the live pages on 2026-11-01 (read from this environment with `curl`, after the
+first draft had relied on search summaries). Every statement below matches the current docs.
 
 | Topic                                                                                                                                 | Page                                                                                                                  |
 | ------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
 | `CRON_SECRET` is sent as `Authorization: Bearer <value>` on cron requests; Hobby crons run at most once a day                         | <https://vercel.com/docs/cron-jobs/manage-cron-jobs>                                                                  |
-| Hobby cron limits: number of jobs\*, timing within the hour\*                                                                         | <https://vercel.com/docs/cron-jobs/usage-and-pricing>                                                                 |
+| Hobby cron limits: 100 jobs per project, once a day, within the hour (±59 min)                                                        | <https://vercel.com/docs/cron-jobs/usage-and-pricing>                                                                 |
 | `VERCEL_URL`, `VERCEL_BRANCH_URL`, `VERCEL_PROJECT_PRODUCTION_URL` hold a host **without** `https://`; available at build and runtime | <https://vercel.com/docs/environment-variables/system-environment-variables>                                          |
-| `VERCEL_ENV` values (`production`, `preview`, `development`)\*                                                                        | same page                                                                                                             |
-| `vercel-build` script used instead of `build` when present\*; `buildCommand` in `vercel.json`\*                                       | <https://vercel.com/docs/project-configuration> and <https://vercel.com/docs/deployments/configure-a-build>           |
-| Neon integration variables: `DATABASE_URL` pooled, `DATABASE_URL_UNPOOLED` direct                                                     | <https://neon.com/docs/guides/neon-managed-vercel-integration>                                                        |
+| `VERCEL_ENV` values (`production`, `preview`, `development`)                                                                          | same page                                                                                                             |
+| `vercel.json` sets `buildCommand` to `pnpm run vercel-build` explicitly (no reliance on script-name conventions)                      | <https://vercel.com/docs/project-configuration> and <https://vercel.com/docs/deployments/configure-a-build>           |
+| Neon integration variables: `DATABASE_URL` pooled, `DATABASE_URL_UNPOOLED` direct                                                     | <https://neon.com/docs/guides/vercel-managed-integration>                                                             |
 | Preview deployments get a Neon branch named `preview/<git-branch>`, with its connection string injected for that deployment only      | <https://neon.com/docs/guides/vercel-previews-integration>                                                            |
-| Default database name `neondb`\*, exact labels in both dashboards\*                                                                   | the dashboards themselves                                                                                             |
+| Vercel-managed integration: install flow, Connect Project, "Create database branch for deployment", Custom Prefix                     | <https://neon.com/docs/guides/vercel-managed-integration>                                                             |
 | Function duration limits with Fluid compute                                                                                           | <https://vercel.com/docs/functions/configuring-functions/duration> (checked October 2026, see `docs/architecture.md`) |
 
 The code's behaviour that does **not** depend on those pages (derived auth URL, the bearer check,
