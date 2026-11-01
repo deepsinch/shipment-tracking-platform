@@ -255,3 +255,19 @@ test("seeded deliveries show proof, with a labelled sample photo instead of any 
   expect(withSamplePhoto).toBeGreaterThan(0);
   expect(violations).toEqual([]);
 });
+
+test("AI intake is hidden without an API key, which is how the public demo ships", async ({
+  page,
+}) => {
+  await page.goto("/sign-in");
+  await page
+    .getByTestId("demo-sign-in")
+    .getByRole("button", { name: /Sign in as dispatcher/ })
+    .click();
+  await expect(page).toHaveURL(/\/dashboard\/shipments$/);
+  await page.getByRole("link", { name: "New shipment" }).click();
+  await expect(page.getByRole("heading", { name: "New shipment", level: 1 })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Create shipment" })).toBeVisible();
+  await expect(page.getByTestId("intake-panel")).toHaveCount(0);
+  await expect(page.getByText("Paste a request email")).toHaveCount(0);
+});
