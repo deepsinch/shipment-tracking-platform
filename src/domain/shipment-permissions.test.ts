@@ -5,6 +5,8 @@ import {
   canAssignDrivers,
   canChangeDriver,
   canCreateShipments,
+  canViewDeliveryPhoto,
+  requiresDeliveryProof,
   canSetStatus,
   seesAllOrganizationShipments,
   statusOptionsFor,
@@ -19,13 +21,43 @@ const EXPECTED: Record<
     assign: boolean;
     seesAll: boolean;
     cancel: boolean;
+    proofRequired: boolean;
+    viewsPhoto: boolean;
   }
 > = {
-  admin: { create: true, assign: true, seesAll: true, cancel: true },
-  dispatcher: { create: true, assign: true, seesAll: true, cancel: true },
-  driver: { create: false, assign: false, seesAll: false, cancel: false },
+  admin: {
+    create: true,
+    assign: true,
+    seesAll: true,
+    cancel: true,
+    proofRequired: false,
+    viewsPhoto: true,
+  },
+  dispatcher: {
+    create: true,
+    assign: true,
+    seesAll: true,
+    cancel: true,
+    proofRequired: false,
+    viewsPhoto: true,
+  },
+  driver: {
+    create: false,
+    assign: false,
+    seesAll: false,
+    cancel: false,
+    proofRequired: true,
+    viewsPhoto: false,
+  },
   // An API key is a dispatcher without a person behind it (its scopes narrow it further).
-  api: { create: true, assign: true, seesAll: true, cancel: true },
+  api: {
+    create: true,
+    assign: true,
+    seesAll: true,
+    cancel: true,
+    proofRequired: false,
+    viewsPhoto: false,
+  },
 };
 
 describe("shipment permissions", () => {
@@ -33,6 +65,8 @@ describe("shipment permissions", () => {
     expect(canCreateShipments(role)).toBe(EXPECTED[role].create);
     expect(canAssignDrivers(role)).toBe(EXPECTED[role].assign);
     expect(seesAllOrganizationShipments(role)).toBe(EXPECTED[role].seesAll);
+    expect(requiresDeliveryProof(role)).toBe(EXPECTED[role].proofRequired);
+    expect(canViewDeliveryPhoto(role)).toBe(EXPECTED[role].viewsPhoto);
     for (const status of SHIPMENT_STATUSES) {
       expect(canSetStatus(role, status)).toBe(
         status === "cancelled" ? EXPECTED[role].cancel : true,

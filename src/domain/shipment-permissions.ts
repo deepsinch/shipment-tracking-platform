@@ -49,3 +49,18 @@ export function canSetStatus(role: ActorRole, status: ShipmentStatus): boolean {
 export function statusOptionsFor(role: ActorRole, from: ShipmentStatus): ShipmentStatus[] {
   return allowedNextStatuses(from).filter((status) => canSetStatus(role, status));
 }
+
+/**
+ * Whether the role must give proof of delivery (the recipient's printed name) when marking a
+ * shipment delivered. Drivers are the ones at the door; staff who mark a delivery from the office
+ * are confirming something a customer, a phone call or the carrier's own system told them, so
+ * their delivery is recorded without proof (and shown as such), not blocked.
+ */
+export function requiresDeliveryProof(role: ActorRole): boolean {
+  return role === "driver";
+}
+
+/** Whether the role may open the delivery photo: staff only, not the driver who took it. */
+export function canViewDeliveryPhoto(role: ActorRole): boolean {
+  return role === "admin" || role === "dispatcher";
+}
