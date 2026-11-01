@@ -90,7 +90,11 @@ describe("database", () => {
 
 describe("auth", () => {
   it("returns the secret and the public origin", () => {
-    expect(createEnv(valid).auth).toEqual({ secret: SECRET, url: "http://localhost:3000" });
+    expect(createEnv(valid).auth).toEqual({
+      secret: SECRET,
+      url: "http://localhost:3000",
+      trustedOrigins: ["http://localhost:3000"],
+    });
   });
 
   it("accepts a secret of exactly the minimum length", () => {
@@ -108,6 +112,28 @@ describe("auth", () => {
     );
     expect(() => createEnv({ ...valid, BETTER_AUTH_URL: undefined }).auth).toThrow(
       /BETTER_AUTH_URL is required/,
+    );
+  });
+
+  it("derives the origin on Vercel, where BETTER_AUTH_URL is optional", () => {
+    const onVercel = {
+      BETTER_AUTH_SECRET: SECRET,
+      VERCEL: "1",
+      VERCEL_ENV: "preview",
+      VERCEL_BRANCH_URL: "waybill-git-x-team.vercel.app",
+      VERCEL_URL: "waybill-abc-team.vercel.app",
+    };
+    expect(createEnv(onVercel).auth).toEqual({
+      secret: SECRET,
+      url: "https://waybill-git-x-team.vercel.app",
+      trustedOrigins: [
+        "https://waybill-git-x-team.vercel.app",
+        "https://waybill-abc-team.vercel.app",
+      ],
+    });
+    // Still validated when given.
+    expect(() => createEnv({ ...onVercel, BETTER_AUTH_URL: "waybill.example" }).auth).toThrow(
+      /BETTER_AUTH_URL must be an http/,
     );
   });
 });
@@ -133,18 +159,48 @@ describe("realtime", () => {
 
 describe("demo", () => {
   it("is off unless DEMO_MODE is true", () => {
-    expect(createEnv({}).demo).toEqual({ enabled: false, cronSecret: undefined });
+    expect(createEnv({}).demo).toEqual({
+      enabled: false,
+      cronSecret: undefined,
+      resetDatabases: [],
+    });
     expect(createEnv({ DEMO_MODE: "false" }).demo.enabled).toBe(false);
   });
 
+  const DEMO = {
+    DEMO_MODE: "true",
+    CRON_SECRET: "a-long-enough-cron-secret",
+    DEMO_RESET_DATABASES: "neondb",
+  };
+
   it("requires CRON_SECRET when DEMO_MODE=true", () => {
-    expect(() => createEnv({ DEMO_MODE: "true" }).demo).toThrow(
+    expect(() => createEnv({ ...DEMO, CRON_SECRET: undefined }).demo).toThrow(
       /CRON_SECRET is required when DEMO_MODE=true/,
     );
-    expect(createEnv({ DEMO_MODE: "true", CRON_SECRET: "s3cret" }).demo).toEqual({
+    expect(createEnv(DEMO).demo).toEqual({
       enabled: true,
-      cronSecret: "s3cret",
+      cronSecret: "a-long-enough-cron-secret",
+      resetDatabases: ["neondb"],
     });
+  });
+
+  it("rejects a short CRON_SECRET without echoing it", () => {
+    const read = () => createEnv({ ...DEMO, CRON_SECRET: "s3cret" }).demo;
+    expect(read).toThrow(/CRON_SECRET must be at least 16 characters/);
+    expect(read).not.toThrow(/s3cret/);
+  });
+
+  it("requires the reset allow-list when DEMO_MODE=true, and parses it", () => {
+    expect(() => createEnv({ ...DEMO, DEMO_RESET_DATABASES: "" }).demo).toThrow(
+      /DEMO_RESET_DATABASES is required when DEMO_MODE=true/,
+    );
+    expect(
+      createEnv({ ...DEMO, DEMO_RESET_DATABASES: " neondb , waybill_demo ," }).demo.resetDatabases,
+    ).toEqual(["neondb", "waybill_demo"]);
+  });
+
+  it("asks for neither when demo mode is off", () => {
+    expect(createEnv({ CRON_SECRET: "x" }).demo.enabled).toBe(false);
   });
 
   it("rejects anything but true or false", () => {
@@ -174,5 +230,6 @@ describe("validateEnv", () => {
     expect(message).toContain("BETTER_AUTH_SECRET is required");
     expect(message).toContain("BETTER_AUTH_URL is required");
     expect(message).toContain("CRON_SECRET is required when DEMO_MODE=true");
+    expect(message).toContain("DEMO_RESET_DATABASES is required when DEMO_MODE=true");
   });
 });

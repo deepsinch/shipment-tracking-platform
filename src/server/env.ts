@@ -2,6 +2,8 @@ import "server-only";
 
 import { z } from "zod";
 
+import { resolveAuthUrls, type AuthUrlSource } from "./auth/base-url";
+
 /**
  * Runtime environment for the app, validated with Zod.
  *
@@ -69,15 +71,40 @@ const authSchema = z
         MIN_AUTH_SECRET_LENGTH,
         `must be at least ${MIN_AUTH_SECRET_LENGTH} characters (generate one with: openssl rand -base64 32)`,
       ),
-    BETTER_AUTH_URL: z
-      .string({ error: "is required" })
-      .trim()
-      .min(1, { error: "is required", abort: true })
-      .refine((value) => /^https?:\/\//.test(value) && URL.canParse(value), {
-        error: "must be an http:// or https:// URL (the app's public origin)",
-      }),
+    // Optional on Vercel, where the origin is derived (see `resolveAuthUrls`); the resolver says
+    // when it is still required.
+    BETTER_AUTH_URL: z.preprocess(
+      (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+      z
+        .string()
+        .trim()
+        .refine((value) => /^https?:\/\//.test(value) && URL.canParse(value), {
+          error: "must be an http:// or https:// URL (the app's public origin)",
+        })
+        .optional(),
+    ),
+    // Vercel's system environment variables (set by the platform, never by hand).
+    VERCEL: optionalString,
+    VERCEL_ENV: optionalString,
+    VERCEL_PROJECT_PRODUCTION_URL: optionalString,
+    VERCEL_BRANCH_URL: optionalString,
+    VERCEL_URL: optionalString,
   })
-  .transform((env) => ({ secret: env.BETTER_AUTH_SECRET, url: env.BETTER_AUTH_URL }));
+  // A refinement (not only the transform) so that `validateEnv` reports an unresolvable origin
+  // together with a missing secret: `when` runs it even though another field already failed.
+  .refine((env) => resolveAuthUrls(env).ok, {
+    path: ["BETTER_AUTH_URL"],
+    error: (issue) => {
+      const urls = resolveAuthUrls(issue.input as AuthUrlSource);
+      return urls.ok ? undefined : urls.message;
+    },
+    when: () => true,
+  })
+  .transform((env) => {
+    const urls = resolveAuthUrls(env);
+    if (!urls.ok) throw new Error("unreachable: the refinement above rejects unresolvable URLs");
+    return { secret: env.BETTER_AUTH_SECRET, url: urls.url, trustedOrigins: urls.trustedOrigins };
+  });
 
 const realtimeSchema = z
   .object({
@@ -92,6 +119,9 @@ const realtimeSchema = z
   })
   .transform((env) => ({ streamSeconds: env.REALTIME_STREAM_SECONDS }));
 
+/** CRON_SECRET guards a database wipe: long enough that guessing it is hopeless. */
+export const MIN_CRON_SECRET_LENGTH = 16;
+
 const demoSchema = z
   .object({
     DEMO_MODE: z.preprocess(
@@ -99,17 +129,46 @@ const demoSchema = z
       z.enum(["true", "false"], { error: 'must be "true" or "false"' }).optional(),
     ),
     CRON_SECRET: optionalString,
+    DEMO_RESET_DATABASES: optionalString,
   })
   .superRefine((env, ctx) => {
-    if (env.DEMO_MODE === "true" && !env.CRON_SECRET) {
+    if (env.DEMO_MODE !== "true") return;
+    if (!env.CRON_SECRET) {
       ctx.addIssue({
         code: "custom",
         path: ["CRON_SECRET"],
         message: "is required when DEMO_MODE=true (it guards the nightly demo reset)",
       });
+    } else if (env.CRON_SECRET.length < MIN_CRON_SECRET_LENGTH) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["CRON_SECRET"],
+        message: `must be at least ${MIN_CRON_SECRET_LENGTH} characters (generate one with: openssl rand -base64 32)`,
+      });
+    }
+    if (!env.DEMO_RESET_DATABASES) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["DEMO_RESET_DATABASES"],
+        message:
+          "is required when DEMO_MODE=true: the name of the database the nightly reset may wipe " +
+          "(comma-separated for several), e.g. neondb",
+      });
     }
   })
-  .transform((env) => ({ enabled: env.DEMO_MODE === "true", cronSecret: env.CRON_SECRET }));
+  .transform((env) => ({
+    enabled: env.DEMO_MODE === "true",
+    cronSecret: env.CRON_SECRET,
+    /**
+     * Databases the demo reset is allowed to wipe, by name. An explicit allow-list instead of a
+     * hard-coded name (hosts name databases differently: `neondb` on Neon), so a wipe can only
+     * ever hit a database the owner named on purpose.
+     */
+    resetDatabases: (env.DEMO_RESET_DATABASES ?? "")
+      .split(",")
+      .map((name) => name.trim())
+      .filter((name) => name !== ""),
+  }));
 
 const groups = {
   database: databaseSchema,

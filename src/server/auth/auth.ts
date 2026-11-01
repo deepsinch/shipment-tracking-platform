@@ -17,6 +17,7 @@ function createAuth() {
     // the validated environment: a missing or short secret fails with a clear message.
     secret: env.auth.secret,
     baseURL: env.auth.url,
+    trustedOrigins: env.auth.trustedOrigins,
     database: drizzleAdapter(db, { provider: "pg", schema }),
     databaseHooks: {
       session: {
