@@ -1,6 +1,7 @@
 import { getAuthContextFromHeaders } from "@/server/auth/request-context";
 import { env } from "@/server/env";
 import { advanceDemoSimulation } from "@/server/services/advance-demo-simulation";
+import { deliverWebhooksAfterResponse } from "@/server/webhooks/schedule";
 
 /**
  * A tick drives every demo truck once: a few queries per truck. Well under a minute even over a
@@ -31,6 +32,8 @@ export async function POST(request: Request): Promise<Response> {
       ? new Response(null, { status: 404, headers: NO_STORE })
       : Response.json({ error: "Not part of the demo." }, { status: 403, headers: NO_STORE });
   }
+  // The simulated trucks change statuses too: their webhooks are delivered like any other.
+  if (result.ran) deliverWebhooksAfterResponse();
   return Response.json(
     result.ran
       ? { ran: true, driven: result.driven, remaining: result.remaining }

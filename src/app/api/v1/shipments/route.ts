@@ -4,6 +4,7 @@ import { etagOf } from "@/server/api/etag";
 import { problemFromFailure } from "@/server/api/failures";
 import { CREATE_SHIPMENT_FIELDS } from "@/server/api/request-fields";
 import { toApiShipment, toApiShipmentSummary } from "@/server/api/projections";
+import { deliverWebhooksAfterResponse } from "@/server/webhooks/schedule";
 import { apiRoute, jsonResponse, readJsonObject, rejectUnknownFields } from "@/server/api/route";
 
 export const GET = apiRoute("shipments:read", async ({ request, ctx }) => {
@@ -30,6 +31,7 @@ export const POST = apiRoute("shipments:write", async ({ request, ctx }) => {
 
   const result = await createShipment(ctx, body.body);
   if (!result.ok) return problemFromFailure(result);
+  deliverWebhooksAfterResponse();
 
   return jsonResponse(toApiShipment(result.shipment), {
     status: 201,

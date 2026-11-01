@@ -5,6 +5,7 @@ import { CHANGE_STATUS_FIELDS } from "@/server/api/request-fields";
 import { toApiShipment } from "@/server/api/projections";
 import { apiRoute, jsonResponse, readJsonObject, rejectUnknownFields } from "@/server/api/route";
 import { changeShipmentStatus } from "@/server/services/change-shipment-status";
+import { deliverWebhooksAfterResponse } from "@/server/webhooks/schedule";
 
 /** The service calls the target status `toStatus`; the API calls it `status`. */
 const SERVICE_TO_API_FIELD = { toStatus: "status" };
@@ -46,6 +47,7 @@ export const POST = apiRoute<{ id: string }>(
       toStatus: status,
     });
     if (!result.ok) return problemFromFailure(result, SERVICE_TO_API_FIELD);
+    deliverWebhooksAfterResponse();
 
     return jsonResponse(toApiShipment(result.shipment), { etag: etagOf(result.shipment.version) });
   },

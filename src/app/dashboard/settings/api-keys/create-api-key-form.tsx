@@ -19,7 +19,7 @@ import { FieldDescription, FieldLegend, FieldSet } from "@/components/ui/field";
 import { API_SCOPE_LABELS, API_SCOPES } from "@/domain/api-keys";
 
 import { createApiKeyAction, type CreateApiKeyState } from "./actions";
-import { CopyButton } from "./copy-button";
+import { CopyButton } from "@/components/copy-button";
 
 /**
  * Creates a key and shows its secret once. The secret lives only in this component's action

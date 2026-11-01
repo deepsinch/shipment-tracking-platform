@@ -8,7 +8,9 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { canManageApiKeys } from "@/domain/api-keys";
 import { ROLE_LABELS } from "@/domain/roles";
+import { canManageWebhooks } from "@/domain/webhooks";
 import { getCurrentUser, requireAuthContextOn } from "@/server/auth/session";
+import { drainWebhooksOnActivity } from "@/server/webhooks/schedule";
 
 import { signOutAction } from "../(auth)/actions";
 
@@ -30,6 +32,8 @@ export default function DashboardLayout({ children }: LayoutProps<"/dashboard">)
 async function AuthenticatedShell({ children }: { children: React.ReactNode }) {
   const context = await requireAuthContextOn("/dashboard");
   const user = await getCurrentUser();
+  // Staff opening the dashboard doubles as the heartbeat that retries due webhooks (throttled).
+  drainWebhooksOnActivity();
 
   return (
     <RealtimeProvider>
@@ -46,6 +50,11 @@ async function AuthenticatedShell({ children }: { children: React.ReactNode }) {
             {canManageApiKeys(context.role) && (
               <Button asChild variant="ghost">
                 <Link href="/dashboard/settings/api-keys">API keys</Link>
+              </Button>
+            )}
+            {canManageWebhooks(context.role) && (
+              <Button asChild variant="ghost">
+                <Link href="/dashboard/settings/webhooks">Webhooks</Link>
               </Button>
             )}
           </nav>
