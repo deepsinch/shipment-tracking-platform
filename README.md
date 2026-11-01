@@ -8,6 +8,16 @@ It is a portfolio project, built to production standards: a strict state machine
 history enforced by the database, optimistic concurrency, multi-tenant isolation, and tests against
 a real Postgres.
 
+## Live demo
+
+**Live demo: _link coming soon_** (the owner's deployment guide is [docs/deployment.md](docs/deployment.md)).
+
+Open it and click **Try the demo** on the sign-in page: three one-click accounts (admin,
+dispatcher, driver) on a seeded company. Open the live map and the trucks move along real roads.
+The data resets every night around 03:00 UTC. It runs on Vercel and Neon; the whole deployment
+(migrations, demo data, nightly reset) is code in this repository, described in
+[docs/deployment.md](docs/deployment.md).
+
 ## Features (Phase 1)
 
 - **Accounts and companies:** sign up creates a company workspace with you as admin. Roles: admin,
@@ -116,22 +126,23 @@ The seed runs once (a re-run is a no-op, because history is never deleted). For 
 
 ## Scripts
 
-| Script               | Purpose                                                    |
-| -------------------- | ---------------------------------------------------------- |
-| `pnpm dev`           | Next.js dev server                                         |
-| `pnpm build`         | Production build                                           |
-| `pnpm start`         | Serve the production build                                 |
-| `pnpm lint`          | ESLint                                                     |
-| `pnpm typecheck`     | Generate route types, then `tsc --noEmit`                  |
-| `pnpm format:check`  | Prettier check (`pnpm format` to fix)                      |
-| `pnpm test`          | Vitest: unit and integration tests                         |
-| `pnpm test:e2e`      | Playwright end-to-end tests against a production build     |
-| `pnpm db:generate`   | Generate a migration from the Drizzle schema               |
-| `pnpm db:migrate`    | Apply migrations to `DATABASE_URL`                         |
-| `pnpm db:seed`       | Load the demo data (`--reset` recreates the dev database)  |
-| `pnpm auth:generate` | Regenerate the Better Auth tables (must be a no-op change) |
-| `pnpm simulate`      | Drive the demo trucks so the live map moves (dev DB only)  |
-| `pnpm routes:fetch`  | One-off: re-fetch the committed road route fixture (OSRM)  |
+| Script               | Purpose                                                     |
+| -------------------- | ----------------------------------------------------------- |
+| `pnpm dev`           | Next.js dev server                                          |
+| `pnpm build`         | Production build                                            |
+| `pnpm start`         | Serve the production build                                  |
+| `pnpm lint`          | ESLint                                                      |
+| `pnpm typecheck`     | Generate route types, then `tsc --noEmit`                   |
+| `pnpm format:check`  | Prettier check (`pnpm format` to fix)                       |
+| `pnpm test`          | Vitest: unit and integration tests                          |
+| `pnpm test:e2e`      | Playwright end-to-end tests against a production build      |
+| `pnpm db:generate`   | Generate a migration from the Drizzle schema                |
+| `pnpm db:migrate`    | Apply migrations to `DATABASE_URL`                          |
+| `pnpm db:seed`       | Load the demo data (`--reset` recreates the dev database)   |
+| `pnpm auth:generate` | Regenerate the Better Auth tables (must be a no-op change)  |
+| `pnpm simulate`      | Drive the demo trucks so the live map moves (dev DB only)   |
+| `pnpm routes:fetch`  | One-off: re-fetch the committed road route fixture (OSRM)   |
+| `pnpm vercel-build`  | The deploy build: validate env, migrate, seed (demo), build |
 
 ## Credits
 
@@ -142,6 +153,7 @@ The seed runs once (a re-run is a no-op, because history is never deleted). For 
 
 ## Documentation
 
+- [Deployment guide](docs/deployment.md): click-by-click Vercel + Neon setup, demo mode, troubleshooting.
 - [Architecture](docs/architecture.md): system design, state machine, multi-tenancy, decisions log.
 - [Engineering notes](docs/engineering-notes.md): the problems worth discussing and the tradeoffs.
 - [Implementation notes](docs/implementation-notes.md): status, roadmap, gotchas, environment.

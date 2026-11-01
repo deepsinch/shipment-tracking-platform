@@ -24,15 +24,17 @@ Phase 1 delivered, checkpoint by checkpoint:
 format:check, lint, typecheck, test (212 unit + 188 integration), build and test:e2e (13 specs)
 pass. **Next: Phase 4a (deployment), before Phase 3**, on branch `phase-4a-deploy` (the owner chose a live
 demo URL first). Design: `docs/architecture.md`, "Phase 4a: deployment". Checkpoint 1 is done
-(as-built notes under "CI and hardening (Phase 4a, checkpoint 1)" below): format:check, lint,
-typecheck, test (238 unit + 188 integration), build and test:e2e (15 specs) pass; **next is
-checkpoint 2**.
+(as-built notes under "CI and hardening (Phase 4a, checkpoint 1)" below). Checkpoint 2 is done
+too (notes under "Deploy pipeline and demo mode (Phase 4a, checkpoint 2)"): format:check, lint,
+typecheck, test (283 unit + 208 integration), build and test:e2e (21 specs) pass. **Phase 4a is
+code-complete; what remains is the owner's deploy** (`docs/deployment.md`) and putting the live
+URL in the README.
 Checkpoints:
 
 1. **[done] CI and hardening.** GitHub Actions workflow (Postgres service, all six checks, Playwright's own
    Chromium in CI), runtime env validation with Zod (lazy, clear messages), security headers incl.
    CSP for OpenFreeMap, `robots.txt`.
-2. **Deploy pipeline and demo mode.** `vercel-build` (validate, migrate on the direct URL, idempotent
+2. **[done] Deploy pipeline and demo mode.** `vercel-build` (validate, migrate on the direct URL, idempotent
    seed, build), `DATABASE_URL_UNPOOLED` mapping, `vercel.json` cron, demo banner and one-click
    demo sign-in, `/api/cron/reset-demo`, globally throttled `/api/demo/tick`, and a click-by-click
    deployment guide for the owner (`docs/deployment.md`).
@@ -659,6 +661,94 @@ import.meta.url).href)` makes Turbopack emit the worker to `/_next/static/media/
   staff detail with route map, driver detail and public tracking page all render normally under
   the CSP (fonts, styles, tiles, glyphs, markers). Nothing needed fixing.
 
+### Deploy pipeline and demo mode (Phase 4a, checkpoint 2)
+
+- **Auth URLs per environment: `src/server/auth/base-url.ts`** (pure, unit tested).
+  `BETTER_AUTH_URL` wins; else on Vercel `https://$VERCEL_PROJECT_PRODUCTION_URL` (production,
+  falling back to `$VERCEL_URL`) or `https://$VERCEL_BRANCH_URL` / `$VERCEL_URL` (preview); outside
+  Vercel it is still required. `env.auth.trustedOrigins` lists every host of the deployment and is
+  passed to Better Auth. Vercel's `VERCEL_*` hosts carry no scheme. Gotcha: Better Auth only
+  checks the `Origin` header on requests that arrive through its HTTP handler; our Server Actions
+  call `auth.api.*` directly, so `trustedOrigins` mainly matters for `/api/auth/*`.
+- **`env.ts` additions:** `BETTER_AUTH_URL` optional on Vercel (the error says why it is required
+  elsewhere, and is listed together with other problems by `validateEnv`: a refinement with
+  `when: () => true`, because Zod skips object refinements after a field failed). Demo group:
+  `CRON_SECRET` at least 16 characters, `DEMO_RESET_DATABASES` required when `DEMO_MODE=true`
+  (comma-separated names, `env.demo.resetDatabases`).
+- **Database-name guards, the design.** Only _wipes_ are guarded; migrating and seeding never look
+  at the name, so Neon's `neondb` is never blocked. The local scripts keep their hard-coded names
+  (`pnpm db:seed --reset` and `pnpm simulate`: only `waybill`; test setups: `_test`, `_e2e`). The
+  hosted reset has no hard-coded name: it needs `DEMO_MODE=true`, the secret, and the database
+  named in `DEMO_RESET_DATABASES`; `vercel-build` checks the allow-list too, so a wrong name fails
+  the deploy, not the first night. Also checked: pooled and direct URLs name the same database.
+- **`pnpm vercel-build` (`scripts/vercel-build.ts`, `src/server/deploy/build-plan.ts`):**
+  `validateEnv` (all problems), `migrateDatabase(directUrl)`, `seedDemo()` if demo, `next build`.
+  Does not read `.env` (on Vercel the project's variables are the environment). `vercel.json` sets
+  `buildCommand` explicitly rather than relying on `vercel-build` being auto-detected.
+  `migrateDatabase` (`src/server/db/maintenance.ts`) holds a `pg_advisory_lock` for the run so
+  two deploys sharing a database take turns. Tested locally against a fresh database: nothing set,
+  demo on with a database missing from the allow-list, an unreachable direct URL (each fails
+  loudly, exit 1), then a full run twice (second seed is a no-op).
+- **Migrations folder is `process.cwd()`-relative** (`MIGRATIONS_FOLDER`), not `import.meta.dirname`:
+  the cron route runs migrations inside the app, where a bundler moves the file; and
+  `outputFileTracingIncludes` in `next.config.ts` ships the SQL files with that one route
+  (verified in `.next/server/app/api/cron/reset-demo/route.js.nft.json`).
+- **Cron: `vercel.json`** `0 3 * * *` for `/api/cron/reset-demo` (one job, daily: Hobby). The
+  constants live in `src/domain/demo.ts`; a unit test keeps `vercel.json` equal to them. The banner
+  says "around 03:00 UTC" because a Hobby daily job runs at some point within its hour.
+- **`GET /api/cron/reset-demo`:** 404 unless demo mode, 401 unless `Bearer <CRON_SECRET>`
+  (`isCronAuthorized`: SHA-256 of both sides, then `timingSafeEqual`, so lengths do not leak),
+  then `resetDemo()`: allow-list check, `resetDatabase(directUrl)`, `seedDemo()`. A refusal is a
+  generic 500 (details in the function log). `maxDuration = 300`; locally it takes about a second.
+  Tests use a dedicated database (`tests/integration/dedicated-database.ts`:
+  `<TEST_DATABASE_URL name>_demo_test`, created and migrated on first use): the main test database
+  must not be wiped or get `admin@demo.test`, which would turn the seed test into a skip. Proven red:
+  secret check replaced by `true` (5 tests fail), demo gate removed (4 fail).
+- **`POST /api/demo/tick`** (`advanceDemoSimulation` service, route stays thin). Order: demo mode
+  (404) before the session (401) before the organization (403) before the throttle, so a stranger
+  cannot spend the throttle. "The demo organization" is the one the seeded `admin@demo.test`
+  belongs to, never found by name: sign-up is open on a public demo, and anyone can call their
+  company "Demo Freight Co" (a test does exactly that and gets 403). Signed-in only (not public):
+  the demo's data is not public, and a public write endpoint would invite abuse.
+- **The tick throttle** (`claimDemoTick`, table `demo_tick_state`, migration 0006, a new table, so
+  backward compatible): one conditional upsert, same pattern as the ping throttle. Forced race in
+  `tick-throttle.integration.test.ts` (a third transaction holds the row `FOR UPDATE` until both
+  contenders are blocked): proven red against a read-then-write version (and the plain parallel
+  burst still passed against it, as CLAUDE.md warns). The window uses the app server's clock, as
+  the ping throttle does; skew between instances is far below 12 s.
+- **Simulator on serverless.** One simulator per instance on `globalThis` (`getDemoSimulator`),
+  drivers resolved on every tick (the reset recreates them; `SimulatorOptions.drivers` may now be
+  a function). A new instance picks trucks up from their stored positions, so nothing jumps. What
+  an instance forgets: an exception's countdown and "already had one", so a truck's exception may
+  last longer or recur when ticks move between instances. Accepted for a demo.
+- **Demo UI.** `DemoOnly` (`await connection()`, then `env.demo.enabled`) inside
+  `<Suspense fallback={null}>` renders the banner (root layout), the one-click buttons (sign-in
+  page) and the ticker (`DemoLive` on the live map and staff detail page). Read at request time,
+  so one build serves both modes (the e2e uses that) and the rest keeps its static shell; in demo
+  mode the banner streams in a moment after the shell (a small layout shift, accepted). The
+  one-click buttons post a _role_ to `demoSignInAction`, which looks up the email and the published
+  password server-side and calls the same `signIn` service (rate limits included; an e2e test
+  exhausts an address's allowance and clicks a button). No credentials are in the page.
+- **Ticker (`src/lib/demo-ticker.ts`, pure, fake-timer tests):** 12 s + up to 3 s jitter after the
+  previous request finished, paused and aborted when the tab is hidden, stops on unmount and on
+  401/403/404. Gotcha found by the e2e: the `fetch` body must be read (`arrayBuffer()`), or the
+  response never finishes loading and a test (or a connection) hangs.
+- **E2E for demo mode:** a second web server of the same build (`next start --port 3101`) with
+  `DEMO_MODE=true` against `waybill_demo_e2e` (derived from `E2E_DATABASE_URL`; prepared and
+  seeded by its command), a second Playwright project `demo` that runs only `demo.spec.ts`. Servers
+  start in order, so the second reuses the first's build. The first server pins `DEMO_MODE=false`
+  so a developer's `.env` cannot change the regular specs. `demo-off.spec.ts` proves nothing demo
+  renders and both endpoints are 404 there (proven red by forcing `DemoOnly` to render).
+- **Visual check** (390 px and 1280 px, banner, sign-in with the demo card, live map under the
+  banner): fine. The banner's dismiss button was enlarged to a 28 px touch target.
+- **Docs could not be checked at the source.** `vercel.com` and `neon.com` were unreachable from
+  the build environment (`getaddrinfo ENOTFOUND`; web search worked). `docs/deployment.md` marks
+  which statements are verified only through search summaries; the architect or owner should skim
+  the linked pages. Facts the code depends on were confirmed that way: `VERCEL_*` hosts have no
+  scheme; `CRON_SECRET` arrives as `Authorization: Bearer …`; Neon's `DATABASE_URL` is pooled,
+  `DATABASE_URL_UNPOOLED` direct; previews get branch `preview/<git-branch>`.
+- **Still the owner's job:** the dashboard steps, then replace "link coming soon" in the README.
+
 ### Testing
 
 - `pnpm test` runs two Vitest projects: `unit` (`src/**/*.test.ts`) and `integration`
@@ -678,10 +768,11 @@ import.meta.url).href)` makes Turbopack emit the worker to `/_next/static/media/
 - **The CSP allows inline scripts** (decision 40). An injected inline `<script>` would run; the
   defences are React's escaping and the `react/no-danger` lint rule. If Next ever supports nonces
   or hashes with partial prerendering, tighten `script-src`.
-- **Preview deployments and `BETTER_AUTH_URL`.** It is required, but each Vercel preview has its
-  own URL. Checkpoint 2 must set it per environment (or derive it from `VERCEL_URL` /
-  `VERCEL_BRANCH_URL` and add the origin to Better Auth's trusted origins) so sign-in works on
-  previews.
+- **The hosted demo runs out of moving trucks.** Trucks only move while someone views the map, at
+  30x compression (about 8 km per tick); viewing time adds up across visitors, so after a few
+  minutes of total viewing every assigned truck is delivered and the map is empty until the
+  nightly reset. Options if it bites: a slower compression for the hosted demo, a reset when a
+  tick finds nothing left (signs everyone out), or a simulator that books new work. Left as is.
 
 - User deletion fails with an FK error once the user has created shipments or events (by design).
   Org deletion is disabled in Better Auth (`disableOrganizationDeletion`).
@@ -700,7 +791,7 @@ import.meta.url).href)` makes Turbopack emit the worker to `/_next/static/media/
   that but lets anyone lock a victim out. Planned fix: a looser per-email cap (e.g. 20/hour) plus
   breached-password checks at sign-up; at scale, CAPTCHA after repeated failures.
 - **Seeded dates age.** The demo seed is a one-off; rerun `pnpm db:seed --reset` locally for fresh
-  "recent" dates. A hosted demo will need a scheduled reset (Phase 4).
+  "recent" dates. The hosted demo gets them from the nightly reset.
 - `notFound()` on dynamic pages streams a 200 with `noindex` (see checkpoint 5b gotchas).
 - Sign-up says when an email is already registered (account enumeration). Accepted for now as a
   product choice; revisit with email verification in Phase 3 ("check your email" response).
@@ -737,8 +828,8 @@ import.meta.url).href)` makes Turbopack emit the worker to `/_next/static/media/
   does not geocode), so a new booking joins the demo only if it is assigned to a driver and has
   coordinates; seeded pairs follow roads, others a straight line. Geocoding at booking would fix it.
 - **The demo runs out.** After about 12 minutes at the defaults every assigned truck is delivered
-  and the simulator suggests `pnpm db:seed --reset`. A hosted demo needs the scheduled reset
-  (Phase 4) or a simulator that books new work.
+  and the simulator suggests `pnpm db:seed --reset`. The hosted demo has the nightly reset (see the
+  first item above for the remaining gap).
 - **Simulator exceptions are coarse.** A 1 % chance per tick in transit, one per truck per run,
   always cleared after 5 ticks; no failed delivery attempts or returns.
 - **Route fixture licence.** OSRM demo data is OpenStreetMap (ODbL); the attribution is in the
@@ -765,6 +856,12 @@ import.meta.url).href)` makes Turbopack emit the worker to `/_next/static/media/
   if an install fails with `ENOTFOUND`, re-run that one command with `registry.npmjs.org` removed from
   `NO_PROXY`, `no_proxy`, `npm_config_noproxy` and `GLOBAL_AGENT_NO_PROXY` so it goes through the
   agent proxy. Do not use mirrors or other registries.
+- **More databases (created on first use, nothing to do by hand):** `waybill_demo_e2e` (the demo
+  server of `pnpm test:e2e`, wiped and seeded by its command) and `waybill_demo_test` (the demo
+  reset and tick integration tests; migrated every run, never wiped by the global setup). The role
+  needs `CREATEDB` (already in `.env.example` and CI).
+- **vercel.com and neon.com are not reachable from the build environment** (DNS fails; web search
+  works). See the checkpoint 2 notes for what that meant for `docs/deployment.md`.
 - The Postgres role, databases and `.env` survived a container restart in the same session; only
   the server needs restarting (`service postgresql start`). A brand-new cloud session may need them
   recreated.
