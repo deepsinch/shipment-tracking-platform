@@ -35,11 +35,11 @@ const GHENT = city("Ghent");
 const FAST: Partial<SimulatorConfig> = { timeCompression: 100, exceptionChance: 0 };
 
 /**
- * A stepping clock, safely in the past: `changeShipmentStatus` rejects device times more than five
- * minutes ahead of the real clock, and every step must come after the shipment's booking.
+ * A stepping clock starting now. The simulator passes it to the services as `deps.now`, so their
+ * future-time checks follow it instead of the real clock.
  */
 function steppingClock(stepMs = 12_000) {
-  let time = Date.now() - 60 * 60_000;
+  let time = Date.now();
   return {
     now: () => new Date(time),
     step: (ms = stepMs) => {

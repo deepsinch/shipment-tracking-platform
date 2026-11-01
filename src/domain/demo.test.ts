@@ -18,13 +18,20 @@ describe("vercel.json", () => {
   };
 
   it("schedules the nightly reset at the time the banner announces", () => {
-    expect(config.crons).toEqual([{ path: DEMO_RESET_PATH, schedule: DEMO_RESET_CRON }]);
+    expect(config.crons).toContainEqual({ path: DEMO_RESET_PATH, schedule: DEMO_RESET_CRON });
   });
 
-  it("stays within the Hobby plan: one job, at most once a day", () => {
-    expect(config.crons).toHaveLength(1);
+  it("schedules the daily purge at a different hour from the reset", () => {
+    const purge = config.crons?.find((cron) => cron.path === "/api/cron/purge");
+    expect(purge?.schedule).toMatch(/^\d{1,2} \d{1,2} \* \* \*$/);
+    expect(purge?.schedule.split(" ")[1]).not.toBe(DEMO_RESET_CRON.split(" ")[1]);
+  });
+
+  it("stays within the Hobby plan: every job at most once a day", () => {
     // minute hour day-of-month month day-of-week: fixed minute and hour, every day.
-    expect(DEMO_RESET_CRON).toMatch(/^\d{1,2} \d{1,2} \* \* \*$/);
+    for (const cron of config.crons ?? []) {
+      expect(cron.schedule).toMatch(/^\d{1,2} \d{1,2} \* \* \*$/);
+    }
   });
 
   it("builds with the deploy script, not plain next build", () => {

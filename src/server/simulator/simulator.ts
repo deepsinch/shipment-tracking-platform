@@ -266,14 +266,18 @@ export function createSimulator(options: SimulatorOptions) {
       }
 
       const place = placeOf(action.place, stops, pointAlong(route, distanceM));
-      const result = await changeShipmentStatus(driver, {
-        shipmentId: shipment.id,
-        expectedVersion: version,
-        toStatus: action.toStatus,
-        occurredAt: now,
-        publicNote: action.publicNote,
-        location: place,
-      });
+      const result = await changeShipmentStatus(
+        driver,
+        {
+          shipmentId: shipment.id,
+          expectedVersion: version,
+          toStatus: action.toStatus,
+          occurredAt: now,
+          publicNote: action.publicNote,
+          location: place,
+        },
+        { now: () => now },
+      );
       record(result.ok ? "ok" : result.reason);
       // A dispatcher may have changed the shipment meanwhile: keep the old memory and re-plan
       // from the fresh status next tick.
@@ -327,11 +331,15 @@ async function book(
     { now: () => now },
   );
   if (!created.ok) return { ok: false, reason: created.reason };
-  const assigned = await assignDriver(dispatcher, {
-    shipmentId: created.shipment.id,
-    expectedVersion: created.shipment.version,
-    driverId: driver.userId,
-  });
+  const assigned = await assignDriver(
+    dispatcher,
+    {
+      shipmentId: created.shipment.id,
+      expectedVersion: created.shipment.version,
+      driverId: driver.userId,
+    },
+    { now: () => now },
+  );
   if (!assigned.ok) return { ok: false, reason: assigned.reason };
   return { ok: true, trackingCode: created.shipment.trackingCode };
 }
