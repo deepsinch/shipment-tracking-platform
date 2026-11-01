@@ -1,4 +1,5 @@
 import { getAuthContextFromHeaders } from "@/server/auth/request-context";
+import { env } from "@/server/env";
 import { getRealtimeBus } from "@/server/realtime";
 import { createRealtimeStream, SSE_HEADERS, streamLifetimeMs } from "@/server/realtime/sse-stream";
 
@@ -28,7 +29,7 @@ export async function GET(request: Request): Promise<Response> {
     viewer,
     bus: getRealtimeBus(),
     signal: request.signal,
-    lifetimeMs: streamLifetimeMs(),
+    lifetimeMs: streamLifetimeMs(env.realtime.streamSeconds),
   });
   return new Response(stream, { headers: SSE_HEADERS });
 }

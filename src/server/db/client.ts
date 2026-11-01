@@ -3,6 +3,8 @@ import "server-only";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 
+import { env } from "@/server/env";
+
 import * as schema from "./schema";
 
 export type Database = NodePgDatabase<typeof schema> & { $client: Pool };
@@ -19,15 +21,13 @@ const globalForDb = globalThis as typeof globalThis & { waybillDb?: Database };
  *
  * Creating it lazily (rather than at import time) means modules that import services can be
  * loaded without DATABASE_URL, e.g. during `next build` in CI. The pool itself only opens
- * connections when the first query runs.
+ * connections when the first query runs. A missing or malformed `DATABASE_URL` throws an
+ * `EnvError` naming it (see `src/server/env.ts`).
  */
 export function getDb(): Database {
   if (!globalForDb.waybillDb) {
-    const url = process.env.DATABASE_URL;
-    if (!url) {
-      throw new Error("DATABASE_URL is not set. Copy .env.example to .env (see README).");
-    }
-    globalForDb.waybillDb = drizzle({ client: new Pool({ connectionString: url }), schema });
+    const pool = new Pool({ connectionString: env.database.url });
+    globalForDb.waybillDb = drizzle({ client: pool, schema });
   }
   return globalForDb.waybillDb;
 }

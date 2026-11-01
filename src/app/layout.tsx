@@ -1,5 +1,10 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { Suspense } from "react";
+
+import { DemoBanner } from "@/components/demo/demo-banner";
+import { DemoOnly } from "@/components/demo/demo-only";
+
 import "./globals.css";
 
 const geistSans = Geist({
@@ -23,7 +28,15 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en" className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}>
-      <body className="flex min-h-full flex-col">{children}</body>
+      <body className="flex min-h-full flex-col">
+        {/* Demo deployments only; read at request time, so the rest keeps its static shell. */}
+        <Suspense fallback={null}>
+          <DemoOnly>
+            <DemoBanner />
+          </DemoOnly>
+        </Suspense>
+        {children}
+      </body>
     </html>
   );
 }

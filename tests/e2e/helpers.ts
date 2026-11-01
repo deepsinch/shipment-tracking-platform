@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { randomInt, randomUUID } from "node:crypto";
 import { promisify } from "node:util";
 
-import { expect, type Page } from "@playwright/test";
+import { expect, type BrowserContext, type Page } from "@playwright/test";
 
 /**
  * Locator notes for this app:
@@ -150,4 +150,32 @@ export async function changeStatus(
     if (value) await page.getByLabel(label).fill(value);
   }
   await page.getByRole("button", { name: "Update status" }).click();
+}
+
+/**
+ * Records every Content-Security-Policy violation in the context's pages: the browser's
+ * `securitypolicyviolation` events (registered before any page script runs) and its console
+ * reports (which also cover workers). Returns the live list; a passing page leaves it empty.
+ */
+export async function recordCspViolations(context: BrowserContext): Promise<string[]> {
+  const violations: string[] = [];
+  await context.exposeFunction("__waybillCspViolation", (violation: string) => {
+    violations.push(violation);
+  });
+  await context.addInitScript(() => {
+    document.addEventListener("securitypolicyviolation", (event) => {
+      const report = (window as unknown as { __waybillCspViolation(v: string): void })
+        .__waybillCspViolation;
+      report(
+        `${event.violatedDirective} blocked ${event.blockedURI || "inline"} on ` +
+          `${location.pathname} (${event.sourceFile}:${event.lineNumber})`,
+      );
+    });
+  });
+  context.on("console", (message) => {
+    if (/Content[- ]Security[- ]Policy/i.test(message.text())) {
+      violations.push(`console: ${message.text()}`);
+    }
+  });
+  return violations;
 }

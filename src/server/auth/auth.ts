@@ -5,6 +5,7 @@ import { asc, eq } from "drizzle-orm";
 
 import { getDb } from "@/server/db/client";
 import * as schema from "@/server/db/schema";
+import { env } from "@/server/env";
 
 import { organizationPlugin, sharedAuthOptions } from "./options";
 
@@ -12,6 +13,11 @@ function createAuth() {
   const db = getDb();
   return betterAuth({
     ...sharedAuthOptions,
+    // Passed explicitly (Better Auth would also read them from process.env) so they go through
+    // the validated environment: a missing or short secret fails with a clear message.
+    secret: env.auth.secret,
+    baseURL: env.auth.url,
+    trustedOrigins: env.auth.trustedOrigins,
     database: drizzleAdapter(db, { provider: "pg", schema }),
     databaseHooks: {
       session: {
