@@ -73,6 +73,58 @@ by checkpoint (design and as-built notes in `docs/architecture.md`, "Phase 2: li
    a reload"), with the list (`… booking made in another tab …`) and the map
    (`live-map.spec.ts`) covered alongside; not duplicated.
 
+## Phase 4b: polish (complete)
+
+One checkpoint on `phase-4b-polish`. format:check, lint, typecheck, test (740 unit + 435
+integration), build and test:e2e (41 tests) pass.
+
+- **Mobile navigation.** `src/components/dashboard-nav.tsx`: the header links from `sm` up; below,
+  a menu button opens a side sheet (Radix dialog: focus trap, Escape, focus returns to the button).
+  Both mark the current page with `aria-current="page"`. The server still decides which links a role
+  sees (`navItems` in the dashboard layout).
+- **Accessibility.** `tests/e2e/accessibility.spec.ts` runs axe (WCAG A/AA and best-practice rules,
+  fails on serious and critical) on landing, sign-in, sign-up, dashboard, detail, live map (tiles
+  blocked), settings pages, driver list and shipment, public tracking, and the open mobile menu. It
+  found one real issue: the destructive colour on its 10 % tint was below 4.5:1 (darkened in
+  `globals.css`). No rule is disabled. Gotcha: axe checks the page as rendered, so run it after the
+  content is visible (a heading assertion first), not right after `goto`.
+- **Lighthouse** (13, mobile, local production build, not a CI gate): landing 96/100/100/100, sign-in
+  100/100/100/63, tracking 93/100/100/54. The two lower SEO scores are the `noindex` on those pages
+  (`is-crawlable`, and a tracking page's missing description), on purpose. Remaining performance
+  findings are framework JS (unused JS, legacy JS in Next's runtime); nothing app-specific worth
+  chasing. Re-run instructions are in the README.
+- **Retention.** `purgeExpiredData` also deletes `webhook_deliveries` and `email_messages` in a final
+  state (`succeeded`, `dead`, plus `suppressed` for emails) created more than 90 days ago; open rows are
+  never deleted. Delivery proofs and `shipment_events` are kept on purpose: the proof is the evidence of
+  who received the goods and the history is the audit trail, so a retention period is the operator's
+  legal decision. Integration tests cover both cutoffs, kept and deleted rows.
+- **Coverage.** `pnpm test:coverage` (v8, source files; components and pages excluded as they are
+  covered by e2e): 88 % lines, 84 % branches.
+- **README** rewritten as a front page, with screenshots in `docs/screenshots/` (taken with real
+  tiles against the seeded dev database; about 380 KB). To retake them, seed with `--reset`, run a
+  production build and use Playwright with the preinstalled Chromium.
+- `tests/e2e/api-keys.spec.ts` had a flaky "No API keys yet" locator (a hidden copy of the previous
+  route matched in strict mode); it now asks for the visible one.
+
+Final known gaps: see "Known issues / TODOs" below (the CSP allows inline scripts; one organization
+per user; no per-organization time zones; the adapters for Resend, Blob and Anthropic have only been
+exercised against fakes; location pings are purged but the index on `received_at` is still missing).
+
+### If I continued
+
+- Real-provider smoke tests run by hand once per key (Resend, Blob, `pnpm intake:eval`), then a small
+  post-deploy check in CI.
+- Nonce- or hash-based CSP once Cache Components supports it, removing inline script allowance.
+- Per-organization time zones, member management UI (invite, change role, deactivate) and an
+  organization switcher.
+- Geocoding at booking so UI-created shipments appear on the map and in the simulator.
+- Marker clustering and a revocation signal for open realtime streams at fleet scale.
+- A per-email sign-in cap with breached-password checks, and email verification at sign-up.
+- A retention index on `location_pings (received_at)` and a configurable retention for delivery
+  proofs once a legal basis is chosen.
+- A proper queue (or Vercel Queues) for webhooks and email instead of drains on activity plus a
+  daily cron.
+
 ## Next: Phase 3
 
 Each checkpoint green and reviewed, like Phase 2. Suggested order (later ones build on earlier):
@@ -107,7 +159,7 @@ Each checkpoint green and reviewed, like Phase 2. Suggested order (later ones bu
 
 **Phase 3 is complete** (public API, webhooks, email, proof of delivery, AI intake). Known gaps
 across the phase, none blocking: no retention or erasure for delivery proofs and photos (decision 70);
-no retention job for old webhook deliveries and email messages; webhook retries and emails wait for
+webhook deliveries and emails in a final state are purged after 90 days (Phase 4b); webhook retries and emails wait for
 activity or the daily cron on a quiet Hobby deployment; the delivery log and the email status on
 the shipment page do not update live; the Resend, Vercel Blob and Anthropic adapters have only been
 exercised against local fakes and mocked SDKs (the owner should send one real email, deliver once
@@ -120,9 +172,8 @@ webhook, no attachments and no batch of several shipments.
   via SSE, truck simulator. Checkpoints above.
 - **Phase 3:** public API with API keys, signed and retried webhooks, email notifications via Resend,
   proof of delivery (photo + signature), AI intake of shipment request emails.
-- **Phase 4:** test coverage, CI with GitHub Actions, README with architecture diagram,
-  accessibility + Lighthouse pass, deploy to Vercel + Neon (demo accounts already exist via the
-  seed).
+- **Phase 4 (done):** CI with GitHub Actions and the deploy to Vercel + Neon (4a); mobile navigation,
+  accessibility (axe e2e) and Lighthouse pass, retention, coverage and the README front page (4b).
 
 ## Decisions and gotchas so far
 

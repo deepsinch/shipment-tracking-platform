@@ -11,7 +11,7 @@ test("an admin creates an API key, an integration lists shipments with it, and r
 
   await page.goto("/dashboard/settings/api-keys");
   await expect(page.getByRole("heading", { name: "API keys", level: 1 })).toBeVisible();
-  await expect(page.getByText("No API keys yet")).toBeVisible();
+  await expect(page.getByText("No API keys yet").locator("visible=true")).toBeVisible();
 
   // Nothing ticked: the form says what is missing and keeps the typed name.
   await page.getByLabel("Name", { exact: true }).fill("ERP integration");

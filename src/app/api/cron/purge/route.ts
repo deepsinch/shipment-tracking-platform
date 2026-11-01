@@ -7,7 +7,7 @@ import { drainBacklog } from "@/server/services/webhook-delivery";
 const NO_STORE = { "Cache-Control": "no-store" };
 
 /**
- * The daily purge of expired location pings and rate-limit rows (plus a webhook drain, see
+ * The daily purge of expired location pings, rate-limit rows and old finished delivery logs (plus a webhook drain, see
  * below), called by Vercel Cron (a GET with
  * `Authorization: Bearer <CRON_SECRET>`, see `vercel.json`). Unlike the demo reset it runs in any
  * deployment that has a `CRON_SECRET`; without one, or with a wrong one, it answers 401.

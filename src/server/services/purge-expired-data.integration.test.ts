@@ -6,9 +6,11 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { getDb } from "@/server/db/client";
 import {
   authRateLimits,
+  emailMessages,
   locationPings,
   shipmentEvents,
   shipmentPositions,
+  webhookDeliveries,
 } from "@/server/db/schema";
 
 import {
@@ -16,6 +18,7 @@ import {
   createTestOrganization,
   createTestShipment,
 } from "../../../tests/integration/fixtures";
+import { insertDelivery, insertEndpoint } from "../../../tests/integration/webhooks";
 import { purgeExpiredData } from "./purge-expired-data";
 
 const DAY = 24 * 60 * 60_000;
@@ -121,5 +124,93 @@ describe("purgeExpiredData", () => {
     await purgeExpiredData();
 
     expect(await tally()).toEqual(before);
+  });
+
+  describe("delivery logs (90 days)", () => {
+    const LOG_DAYS = 90;
+
+    async function addEmail(
+      status: "pending" | "succeeded" | "dead" | "suppressed",
+      ageMs: number,
+    ) {
+      const open = status === "pending";
+      const [row] = await getDb()
+        .insert(emailMessages)
+        .values({
+          organizationId,
+          shipmentId,
+          recipient: "customer@example.test",
+          subject: "s",
+          textBody: "t",
+          htmlBody: "h",
+          idempotencyKey: `purge-test/${randomUUID()}`,
+          status,
+          nextAttemptAt: open ? new Date() : null,
+          transport: status === "succeeded" ? "preview" : null,
+          createdAt: new Date(Date.now() - ageMs),
+        })
+        .returning({ id: emailMessages.id });
+      return row!.id;
+    }
+
+    it("deletes finished webhook deliveries older than 90 days, keeping recent and open ones", async () => {
+      const dispatcher = await createTestContext(organizationId, "dispatcher");
+      const endpoint = await insertEndpoint(organizationId, dispatcher.userId);
+      const old = new Date(Date.now() - LOG_DAYS * DAY - MINUTE);
+      const recent = new Date(Date.now() - LOG_DAYS * DAY + 5 * MINUTE);
+      const finished = { nextAttemptAt: null };
+      const oldSucceeded = await insertDelivery(endpoint, {
+        ...finished,
+        status: "succeeded",
+        createdAt: old,
+      });
+      const oldDead = await insertDelivery(endpoint, {
+        ...finished,
+        status: "dead",
+        createdAt: old,
+      });
+      const recentSucceeded = await insertDelivery(endpoint, {
+        ...finished,
+        status: "succeeded",
+        createdAt: recent,
+      });
+      const oldPending = await insertDelivery(endpoint, { status: "pending", createdAt: old });
+      const oldFailed = await insertDelivery(endpoint, { status: "failed", createdAt: old });
+
+      const result = await purgeExpiredData();
+
+      expect(result.webhookDeliveries).toBeGreaterThanOrEqual(2);
+      const remaining = (
+        await getDb()
+          .select({ id: webhookDeliveries.id })
+          .from(webhookDeliveries)
+          .where(eq(webhookDeliveries.endpointId, endpoint.id))
+      ).map((row) => row.id);
+      expect(remaining.sort()).toEqual([recentSucceeded.id, oldPending.id, oldFailed.id].sort());
+      expect(remaining).not.toContain(oldSucceeded.id);
+      expect(remaining).not.toContain(oldDead.id);
+    });
+
+    it("deletes finished emails older than 90 days, keeping recent and open ones", async () => {
+      const old = LOG_DAYS * DAY + MINUTE;
+      const recent = LOG_DAYS * DAY - 5 * MINUTE;
+      const oldSucceeded = await addEmail("succeeded", old);
+      const oldDead = await addEmail("dead", old);
+      const oldSuppressed = await addEmail("suppressed", old);
+      const recentSucceeded = await addEmail("succeeded", recent);
+      const oldPending = await addEmail("pending", old);
+
+      const result = await purgeExpiredData();
+
+      expect(result.emailMessages).toBeGreaterThanOrEqual(3);
+      const ids = [oldSucceeded, oldDead, oldSuppressed, recentSucceeded, oldPending];
+      const remaining = (
+        await getDb()
+          .select({ id: emailMessages.id })
+          .from(emailMessages)
+          .where(inArray(emailMessages.id, ids))
+      ).map((row) => row.id);
+      expect(remaining.sort()).toEqual([recentSucceeded, oldPending].sort());
+    });
   });
 });
