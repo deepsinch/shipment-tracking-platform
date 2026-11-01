@@ -1,0 +1,182 @@
+import "server-only";
+
+import { z } from "zod";
+
+/**
+ * Runtime environment for the app, validated with Zod.
+ *
+ * Validation is lazy: each group (database, auth, realtime, demo) is parsed the first time code
+ * reads it, and cached. Importing this module never throws, so `next build` and modules that are
+ * only imported (never run) work without any environment variables. A missing or malformed
+ * variable fails the first request that needs it, with a message naming the variable (never its
+ * value: some are secrets).
+ *
+ * Scripts and test setups keep their own `process.env` reads: they run outside the app and often
+ * point `DATABASE_URL` at another database on purpose.
+ */
+
+export class EnvError extends Error {
+  override name = "EnvError";
+}
+
+type Source = Record<string, string | undefined>;
+
+/** Unset and blank are the same thing (`.env.example` lists optional variables with no value). */
+const optionalString = z.preprocess(
+  (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+  z.string().optional(),
+);
+
+const postgresUrl = z
+  .string({ error: "is required" })
+  .trim()
+  .min(1, { error: "is required", abort: true })
+  .refine((value) => /^postgres(ql)?:\/\//.test(value) && URL.canParse(value), {
+    error: "must be a postgres:// or postgresql:// URL",
+  });
+
+const optionalPostgresUrl = z.preprocess(
+  (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+  postgresUrl.optional(),
+);
+
+/** Better Auth signs session cookies with this; `openssl rand -base64 32` gives 44 characters. */
+export const MIN_AUTH_SECRET_LENGTH = 32;
+
+const databaseSchema = z
+  .object({
+    DATABASE_URL: postgresUrl,
+    DATABASE_DIRECT_URL: optionalPostgresUrl,
+    // The name the Neon integration on Vercel gives the direct (unpooled) connection.
+    DATABASE_URL_UNPOOLED: optionalPostgresUrl,
+  })
+  .transform((env) => ({
+    /** Pooled connection for queries and transactions. */
+    url: env.DATABASE_URL,
+    /**
+     * Direct (session) connection, for `LISTEN` and migrations, which a transaction-mode pooler
+     * cannot serve. Without a pooler (locally) it is the same as `url`.
+     */
+    directUrl: env.DATABASE_DIRECT_URL ?? env.DATABASE_URL_UNPOOLED ?? env.DATABASE_URL,
+  }));
+
+const authSchema = z
+  .object({
+    BETTER_AUTH_SECRET: z
+      .string({ error: "is required" })
+      .min(1, { error: "is required", abort: true })
+      .min(
+        MIN_AUTH_SECRET_LENGTH,
+        `must be at least ${MIN_AUTH_SECRET_LENGTH} characters (generate one with: openssl rand -base64 32)`,
+      ),
+    BETTER_AUTH_URL: z
+      .string({ error: "is required" })
+      .trim()
+      .min(1, { error: "is required", abort: true })
+      .refine((value) => /^https?:\/\//.test(value) && URL.canParse(value), {
+        error: "must be an http:// or https:// URL (the app's public origin)",
+      }),
+  })
+  .transform((env) => ({ secret: env.BETTER_AUTH_SECRET, url: env.BETTER_AUTH_URL }));
+
+const realtimeSchema = z
+  .object({
+    REALTIME_STREAM_SECONDS: z.preprocess(
+      (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+      z.coerce
+        .number({ error: "must be a number of seconds" })
+        .int("must be a whole number of seconds")
+        .positive("must be a positive number of seconds")
+        .optional(),
+    ),
+  })
+  .transform((env) => ({ streamSeconds: env.REALTIME_STREAM_SECONDS }));
+
+const demoSchema = z
+  .object({
+    DEMO_MODE: z.preprocess(
+      (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+      z.enum(["true", "false"], { error: 'must be "true" or "false"' }).optional(),
+    ),
+    CRON_SECRET: optionalString,
+  })
+  .superRefine((env, ctx) => {
+    if (env.DEMO_MODE === "true" && !env.CRON_SECRET) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["CRON_SECRET"],
+        message: "is required when DEMO_MODE=true (it guards the nightly demo reset)",
+      });
+    }
+  })
+  .transform((env) => ({ enabled: env.DEMO_MODE === "true", cronSecret: env.CRON_SECRET }));
+
+const groups = {
+  database: databaseSchema,
+  auth: authSchema,
+  realtime: realtimeSchema,
+  demo: demoSchema,
+};
+
+type Groups = typeof groups;
+export type ServerEnv = { readonly [K in keyof Groups]: z.output<Groups[K]> };
+
+/** One line per problem, each naming the variable: "BETTER_AUTH_SECRET is required". */
+function describeIssues(error: z.ZodError): string[] {
+  return error.issues.map((issue) => `${issue.path.join(".") || "environment"} ${issue.message}`);
+}
+
+function parseGroup<K extends keyof Groups>(name: K, source: Source): z.output<Groups[K]> {
+  const result = groups[name].safeParse(source);
+  if (!result.success) {
+    throw new EnvError(
+      `Invalid environment: ${describeIssues(result.error).join("; ")}. ` +
+        "See .env.example for every variable the app reads.",
+    );
+  }
+  return result.data as z.output<Groups[K]>;
+}
+
+/**
+ * The environment read from `source`, each group validated on first access and then cached.
+ * `createEnv` itself never throws.
+ */
+export function createEnv(source: Source): ServerEnv {
+  const cache = new Map<keyof Groups, unknown>();
+  const lazy =
+    <K extends keyof Groups>(name: K) =>
+    (): z.output<Groups[K]> => {
+      if (!cache.has(name)) cache.set(name, parseGroup(name, source));
+      return cache.get(name) as z.output<Groups[K]>;
+    };
+  return Object.defineProperties({} as ServerEnv, {
+    database: { get: lazy("database"), enumerable: true },
+    auth: { get: lazy("auth"), enumerable: true },
+    realtime: { get: lazy("realtime"), enumerable: true },
+    demo: { get: lazy("demo"), enumerable: true },
+  });
+}
+
+/**
+ * Validates every group at once and reports all problems together (a deploy step wants the full
+ * list, not the first failure). Throws an `EnvError`; returns the parsed environment otherwise.
+ */
+export function validateEnv(source: Source): ServerEnv {
+  const problems: string[] = [];
+  const parsed: Record<string, unknown> = {};
+  for (const name of Object.keys(groups) as (keyof Groups)[]) {
+    const result = groups[name].safeParse(source);
+    if (result.success) parsed[name] = result.data;
+    else problems.push(...describeIssues(result.error));
+  }
+  if (problems.length > 0) {
+    throw new EnvError(
+      `Invalid environment:\n${problems.map((problem) => `  - ${problem}`).join("\n")}\n` +
+        "See .env.example for every variable the app reads.",
+    );
+  }
+  return parsed as ServerEnv;
+}
+
+/** The app's environment, read from `process.env` (validated lazily, per group). */
+export const env: ServerEnv = createEnv(process.env);

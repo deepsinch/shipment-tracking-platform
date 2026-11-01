@@ -169,13 +169,15 @@ describe("createRealtimeStream", () => {
 
 describe("streamLifetimeMs", () => {
   it("defaults to 270 seconds, below the route's 300-second maxDuration", () => {
-    expect(streamLifetimeMs({})).toBe(270_000);
+    expect(streamLifetimeMs(undefined)).toBe(270_000);
   });
 
   it("accepts an override, clamped below maxDuration", () => {
-    expect(streamLifetimeMs({ REALTIME_STREAM_SECONDS: "30" })).toBe(30_000);
-    expect(streamLifetimeMs({ REALTIME_STREAM_SECONDS: "600" })).toBe(290_000);
-    expect(streamLifetimeMs({ REALTIME_STREAM_SECONDS: "1" })).toBe(5_000);
-    expect(streamLifetimeMs({ REALTIME_STREAM_SECONDS: "soon" })).toBe(270_000);
+    expect(streamLifetimeMs(30)).toBe(30_000);
+    expect(streamLifetimeMs(600)).toBe(290_000);
+    expect(streamLifetimeMs(1)).toBe(5_000);
   });
+
+  // A malformed REALTIME_STREAM_SECONDS ("soon") is rejected by the env schema (env.test.ts)
+  // instead of silently falling back to the default.
 });

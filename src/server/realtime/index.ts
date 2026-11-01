@@ -1,5 +1,7 @@
 import "server-only";
 
+import { env } from "@/server/env";
+
 import type { RealtimeBus } from "./bus";
 import { PostgresRealtimeBus } from "./postgres-bus";
 
@@ -14,18 +16,17 @@ const globalForRealtime = globalThis as typeof globalThis & {
  * The server instance's realtime bus, created on first use (importing this module needs no
  * environment variables, so `next build` works without a database).
  *
- * The listener connects to `DATABASE_DIRECT_URL`: `LISTEN` needs a direct connection, which
- * transaction-mode poolers (PgBouncer, Neon's pooled endpoint) do not provide. Locally there is no
- * pooler, so it falls back to `DATABASE_URL`. Publishing uses the caller's transaction, whatever
+ * The listener connects to the direct URL (`DATABASE_DIRECT_URL`, else `DATABASE_URL_UNPOOLED`
+ * as the Neon integration names it): `LISTEN` needs a direct connection, which transaction-mode
+ * poolers (PgBouncer, Neon's pooled endpoint) do not provide. Locally there is no pooler, so it
+ * falls back to `DATABASE_URL`. Publishing uses the caller's transaction, whatever
  * URL its pool uses.
  */
 export function getRealtimeBus(): RealtimeBus {
   if (!globalForRealtime.waybillRealtimeBus) {
-    const url = process.env.DATABASE_DIRECT_URL || process.env.DATABASE_URL;
-    if (!url) {
-      throw new Error("DATABASE_URL is not set. Copy .env.example to .env (see README).");
-    }
-    globalForRealtime.waybillRealtimeBus = new PostgresRealtimeBus({ connectionString: url });
+    globalForRealtime.waybillRealtimeBus = new PostgresRealtimeBus({
+      connectionString: env.database.directUrl,
+    });
   }
   return globalForRealtime.waybillRealtimeBus;
 }
