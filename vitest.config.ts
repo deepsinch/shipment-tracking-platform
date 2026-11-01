@@ -15,6 +15,20 @@ export default defineConfig({
     },
   },
   test: {
+    // `pnpm test:coverage`: unit and integration tests together, source files only. Not a CI gate;
+    // e2e specs cover the UI, which is why components and pages are left out of the numbers.
+    coverage: {
+      provider: "v8",
+      include: ["src/**/*.{ts,tsx}"],
+      exclude: [
+        "src/**/*.test.ts",
+        "src/components/**",
+        "src/app/**/*.tsx",
+        "src/server/db/migrations/**",
+        "**/*.d.ts",
+      ],
+      reporter: ["text-summary", "text"],
+    },
     projects: [
       {
         extends: true,
