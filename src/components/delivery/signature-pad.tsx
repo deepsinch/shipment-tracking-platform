@@ -4,7 +4,7 @@ import { EraserIcon, Undo2Icon } from "lucide-react";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { signatureDescription, SIGNATURE_VIEWBOX_WIDTH } from "@/domain/delivery-proof";
+import { signatureDescription, SIGNATURE_VIEWBOX_WIDTH } from "@/domain/signature";
 import {
   beginStroke,
   EMPTY_RECORDER,

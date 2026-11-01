@@ -3,7 +3,7 @@ import {
   signatureDescription,
   signaturePaths,
   type Signature,
-} from "@/domain/delivery-proof";
+} from "@/domain/signature";
 import { cn } from "@/lib/utils";
 
 /**

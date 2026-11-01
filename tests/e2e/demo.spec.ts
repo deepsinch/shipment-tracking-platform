@@ -237,9 +237,9 @@ test("seeded deliveries show proof, with a labelled sample photo instead of any 
   // The drivers' deliveries were seeded with proof (some with a photo, some signed by name only);
   // the dispatcher's were marked from the office and have none.
   await page.goto("/dashboard/shipments?status=delivered");
-  const hrefs = await page
-    .getByRole("link", { name: /^WB-/ })
-    .evaluateAll((links) => links.map((link) => link.getAttribute("href")!));
+  const links = page.getByRole("link", { name: /^WB-/ });
+  await expect(links.first()).toBeVisible();
+  const hrefs = await links.evaluateAll((links) => links.map((link) => link.getAttribute("href")!));
   expect(hrefs.length).toBeGreaterThan(0);
 
   let withSamplePhoto = 0;

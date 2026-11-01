@@ -5,7 +5,7 @@ import {
   SIGNATURE_MAX_STROKES,
   type Signature,
   type SignaturePoint,
-} from "@/domain/delivery-proof";
+} from "@/domain/signature";
 
 /**
  * The state of a signature being drawn: finished strokes and the one in progress. Pure and
