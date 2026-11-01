@@ -1,5 +1,7 @@
 # Waybill
 
+**Live demo: <https://shipment-tracking-platform-xi.vercel.app>** (one-click demo accounts, see [below](#live-demo))
+
 Shipment tracking and dispatch for small carriers. Dispatchers book shipments and move them through
 a clear status flow, drivers update the shipments assigned to them, and customers follow a public
 tracking page without an account.
@@ -10,13 +12,14 @@ a real Postgres.
 
 ## Live demo
 
-**Live demo: _link coming soon_** (the owner's deployment guide is [docs/deployment.md](docs/deployment.md)).
+**Try it: <https://shipment-tracking-platform-xi.vercel.app>**
 
 Open it and click **Try the demo** on the sign-in page: three one-click accounts (admin,
 dispatcher, driver) on a seeded company. Open the live map and the trucks move along real roads.
-The data resets every night around 03:00 UTC. It runs on Vercel and Neon; the whole deployment
-(migrations, demo data, nightly reset) is code in this repository, described in
-[docs/deployment.md](docs/deployment.md).
+Demo accounts are shared by everyone, and the data resets every night around 03:00 UTC. As the demo
+driver, "Share my location" shares a simulated position along the route: your real location is
+never requested or used. It runs on Vercel and Neon; the whole deployment (migrations, demo data,
+nightly reset) is code in this repository, described in [docs/deployment.md](docs/deployment.md).
 
 ## Features (Phase 1)
 
