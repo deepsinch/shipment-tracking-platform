@@ -1,90 +1,162 @@
 # Waybill
 
-**Live demo: <https://shipment-tracking-platform-xi.vercel.app>** (one-click demo accounts, see [below](#live-demo))
+**Multi-tenant shipment tracking and dispatch for small carriers: a strict status machine, live driver
+tracking on a map, signed webhooks, and a public API, built to production standards.**
 
-Shipment tracking and dispatch for small carriers. Dispatchers book shipments and move them through
-a clear status flow, drivers update the shipments assigned to them, and customers follow a public
-tracking page without an account.
+**Live demo: <https://shipment-tracking-platform-xi.vercel.app>**
 
-It is a portfolio project, built to production standards: a strict state machine, an append-only
-history enforced by the database, optimistic concurrency, multi-tenant isolation, and tests against
-a real Postgres.
+![Live map: shipments at their last known positions, updating as drivers report](docs/screenshots/live-map.png)
 
 ## Live demo
 
-**Try it: <https://shipment-tracking-platform-xi.vercel.app>**
+Open the demo and click **Try the demo** on the sign-in page: three one-click accounts on a seeded
+company ("Demo Freight Co", password `demo-password`).
 
-Open it and click **Try the demo** on the sign-in page: three one-click accounts (admin,
-dispatcher, driver) on a seeded company. Open the live map and the trucks move along real roads.
-Demo accounts are shared by everyone, and the data resets every night around 03:00 UTC. As the demo
-driver, "Share my location" shares a simulated position along the route: your real location is
-never requested or used. It runs on Vercel and Neon; the whole deployment (migrations, demo data,
-nightly reset) is code in this repository, described in [docs/deployment.md](docs/deployment.md).
+| Account                | Role       | What to try                                                           |
+| ---------------------- | ---------- | --------------------------------------------------------------------- |
+| `dispatcher@demo.test` | Dispatcher | Book a shipment, assign the driver, change statuses, open the map     |
+| `admin@demo.test`      | Admin      | The same, plus API keys, webhooks and email previews                  |
+| `driver@demo.test`     | Driver     | The phone-first driver app: only assigned shipments, share a location |
 
-## Features (Phase 1)
+The accounts are shared by everyone and **the data resets every night around 03:00 UTC**. Trucks on
+the live map move along real roads. As the demo driver, "Share my location" shares a simulated
+position: your real location is never requested. It runs on Vercel and Neon; the whole deployment
+(migrations, demo data, nightly reset) is code in this repository ([docs/deployment.md](docs/deployment.md)).
 
-- **Accounts and companies:** sign up creates a company workspace with you as admin. Roles: admin,
-  dispatcher, driver.
-- **Shipments list:** search by tracking code or reference, filter by status, URL-based pagination.
-- **Create shipments:** validated form with field-level errors, optional driver assignment, and an
-  unguessable tracking code (`WB-XXXX-XXXX`).
-- **Shipment detail:** addresses, recipient, driver, the full history with who changed what, and
-  internal notes.
-- **Status changes:** only the transitions the state machine and your role allow. If someone else
-  changed the shipment first, you see what changed and can retry, instead of silently overwriting.
-- **Public tracking page:** mobile-first status, progress, route and timeline. Never shows
-  addresses, internal notes or staff names; not indexed by search engines.
-- **Secure by default:** every query is scoped to your company, history is append-only in the
-  database, and sign-in and sign-up are rate limited.
+|                                                                          |                                                                                         |
+| ------------------------------------------------------------------------ | --------------------------------------------------------------------------------------- |
+| ![Landing page](docs/screenshots/landing.png)                            | ![Shipment detail](docs/screenshots/shipment-detail.png)                                |
+| **Driver app** (390 px)                                                  | **Public tracking** (390 px, no account)                                                |
+| <img src="docs/screenshots/driver-app.png" width="280" alt="Driver app"> | <img src="docs/screenshots/public-tracking.png" width="280" alt="Public tracking page"> |
 
-## Features (Phase 2: live tracking)
+The shipment detail shows the real driving route and the proof of delivery (signed name and drawn
+signature). The public page never shows addresses, notes, staff names, a map or coordinates.
 
-- **Driver app** (`/driver`): a phone-first list of the driver's own jobs, big buttons for the next
-  status, and "Share my location" while a shipment is on the road.
-- **Realtime:** the dashboard, detail pages and driver app update without a reload (Server-Sent
-  Events fed by Postgres `LISTEN/NOTIFY`), with a Live indicator and no lost input while you type.
-- **Live map** (`/dashboard/map`): every unfinished shipment at its last known position, coloured
-  by status, gliding as drivers report, with a text list beside it.
-- **Road routes:** the detail page draws the real driving route for the demo's city pairs, from
-  committed OpenStreetMap routing fixtures (no routing service at runtime).
-- **Truck simulator** (`pnpm simulate`): drives the demo trucks along those roads as their driver,
-  through the same rules as a real phone, so the map moves, and books replacements when they run low.
+## Architecture
 
-## Features (Phase 3: integrations)
+```mermaid
+flowchart LR
+  Browser["Dispatcher browser<br/>(dashboard, live map)"]
+  Phone["Driver phone<br/>(driver app, GPS pings)"]
+  Customer["Customer<br/>(public tracking page)"]
+  Client["API client<br/>(API key)"]
 
-- **Public API** (`/api/v1`): API keys created by admins (shown once, stored as a hash), scoped
-  read and write access to shipments, `ETag` / `If-Match` so integrations get the same lost-update
-  protection as the forms, RFC 9457 errors, per-key rate limits and an OpenAPI 3.1 document. See
-  [docs/api.md](docs/api.md).
+  subgraph Vercel["Next.js on Vercel"]
+    RSC["Server Components<br/>and Server Actions"]
+    SSE["SSE route<br/>/api/realtime"]
+    API["/api/v1<br/>(OpenAPI 3.1)"]
+    Cron["Cron: purge, reset"]
+  end
 
-- **Webhooks:** signed, retried deliveries of shipment events to an endpoint an admin registers,
-  with a delivery log and resend, and a guard against calling private addresses.
-- **Customer emails:** status updates through Resend when configured (a stored preview otherwise),
-  with a one-click unsubscribe per company and address.
-- **Proof of delivery:** the driver app collects the recipient's printed name, an optional drawn
-  signature and an optional photo (private storage, shown to staff only); the public page says who
-  signed, nothing more.
-- **AI intake:** with an Anthropic API key, "Paste a request email" on the new-shipment page fills
-  the form as a draft from an email (in English or other European languages). A person reviews
-  every field and books it; nothing is created automatically. Daily caps keep the cost bounded,
-  and without a key the feature is simply not shown. `pnpm intake:eval` scores the model on the
-  committed fixtures (see [docs/deployment.md](docs/deployment.md)).
+  Services["Services<br/>auth check, Zod validation,<br/>transaction, result"]
+  Domain["Domain<br/>(pure: status machine,<br/>tracking codes)"]
 
-Every integration works without its key: it degrades visibly instead of failing, and the tests
-never call a third-party service.
+  subgraph Neon["PostgreSQL 16 (Neon)"]
+    Tables[("Tables: shipments,<br/>append-only events,<br/>outbox, pings")]
+    Notify["LISTEN / NOTIFY"]
+  end
 
-## Stack
+  Browser --> RSC
+  Phone --> RSC
+  Customer --> RSC
+  Client --> API
+  Browser <-. "invalidations" .- SSE
+  Phone <-. "invalidations" .- SSE
+  RSC --> Services
+  API --> Services
+  Cron --> Services
+  Services --> Domain
+  Services --> Tables
+  Tables -. "pg_notify on commit" .-> Notify
+  Notify -.-> SSE
 
-Next.js 16 (App Router, Server Actions, Cache Components) with TypeScript strict, PostgreSQL 16 with
-Drizzle ORM, Better Auth (email/password and organizations), Tailwind CSS with shadcn/ui, Zod,
-Vitest and Playwright. pnpm and Node 22.
+  Services -->|"signed, retried"| Webhooks["Webhook receivers"]
+  Services -->|"queued emails"| Resend["Resend"]
+  Services -->|"proof photos"| Blob["Vercel Blob"]
+  Services -->|"intake drafts"| Anthropic["Anthropic API"]
+```
+
+Routes stay thin and call services, which own authorization, validation and the transaction. The
+organization always comes from the server-side session, never from client input. Webhooks and emails
+are written to an outbox in the same transaction as the change, then delivered with retries. More in
+[docs/architecture.md](docs/architecture.md).
+
+## Highlights for reviewers
+
+- **Status changes cannot be lost or rewritten:** a pure state machine, optimistic concurrency
+  (`version`) and an event insert in one transaction; `shipment_events` is append-only, enforced by a
+  database trigger. [State machine](docs/engineering-notes.md#shipment-status-as-a-state-machine),
+  [append-only history](docs/engineering-notes.md#making-history-impossible-to-rewrite),
+  [proving the concurrency guarantee](docs/engineering-notes.md#proving-optimistic-concurrency-actually-works).
+- **Tenant isolation in the database as well as the code:** composite foreign keys and a single
+  `visibleShipments` scope. [Notes](docs/engineering-notes.md#tenant-isolation-enforced-by-the-database-not-just-the-code).
+- **Realtime without a worker or replay log:** Postgres `LISTEN/NOTIFY` fed SSE, with invalidations
+  and a resync. [Notes](docs/engineering-notes.md#live-updates-without-a-replay-log-and-the-race-hiding-in-re-fetch-on-reconnect).
+- **Race-free throttling:** [location pings](docs/engineering-notes.md#throttling-location-pings-without-a-race),
+  proven with a forced race.
+- **Webhooks on serverless:** signed, retried, no double delivery, SSRF guard.
+  [Notes](docs/engineering-notes.md#webhooks-on-serverless-no-worker-no-double-delivery-no-ssrf).
+- **A public API on services built for sessions:** keys stored as hashes, `ETag` / `If-Match`, RFC 9457
+  errors. [Notes](docs/engineering-notes.md#a-public-api-on-top-of-services-built-for-sessions), [docs/api.md](docs/api.md).
+- **An LLM feature that cannot book, leak or invent:**
+  [AI intake](docs/engineering-notes.md#an-llm-feature-that-cannot-book-leak-or-invent) drafts a form; a person books.
+- **Proof of delivery, and a CSP test that caught a bundling bug:**
+  [notes](docs/engineering-notes.md#proof-of-delivery-and-a-csp-test-that-caught-a-bundling-bug).
+- **Accessibility is tested:** an axe e2e spec runs on every main page and fails on serious violations.
+
+## Features
+
+- **Dispatch:** shipments list with search, status filter and pagination; validated create form with
+  an unguessable tracking code (`WB-XXXX-XXXX`); detail page with the full history; roles (admin,
+  dispatcher, driver); a mobile menu for phones.
+- **Driver app** (`/driver`): the driver's own jobs, big status buttons, proof of delivery (printed
+  name, drawn signature, photo in private storage) and "Share my location".
+- **Live map** (`/dashboard/map`): unfinished shipments at their last known position, with a text list
+  beside it for keyboard and screen-reader users. Detail pages draw the road route.
+- **Public tracking page:** mobile-first status, progress and timeline, `noindex`, nothing internal.
+- **Integrations:** public API with scoped API keys, signed webhooks with a delivery log, customer
+  emails (Resend, or a stored preview), AI intake of request emails (Anthropic). Each works without
+  its key and degrades visibly.
+- **Operations:** daily retention (location pings 30 days, finished webhook and email logs 90 days;
+  delivery proofs and shipment history are kept: audit and evidence), rate limits, security headers
+  with a CSP.
+
+## Tech stack
+
+Next.js 16 (App Router, Server Actions, Cache Components), TypeScript strict, PostgreSQL 16 with
+Drizzle ORM (committed migrations), Better Auth (email/password, organizations), Tailwind CSS and
+shadcn/ui, Zod, MapLibre GL with OpenFreeMap tiles, Vitest, Playwright and axe-core. pnpm, Node 22.
+Deployed on Vercel and Neon, with GitHub Actions CI.
+
+## Quality
+
+| Check                 | Result                                                                      |
+| --------------------- | --------------------------------------------------------------------------- |
+| Unit tests            | 740 (59 files)                                                              |
+| Integration tests     | 435 (40 files) (real PostgreSQL)                                            |
+| End-to-end tests      | 41 tests (Playwright, production build, includes an axe accessibility spec) |
+| Coverage              | 88% lines, 84% branches (`pnpm test:coverage`, source files, UI excluded)   |
+| Lighthouse (landing)  | 96 / 100 / 100 / 100 (performance, accessibility, best practices, SEO)      |
+| Lighthouse (sign-in)  | 100 / 100 / 100 / 63 (noindex)                                              |
+| Lighthouse (tracking) | 93 / 100 / 100 / 54 (noindex)                                               |
+
+Lighthouse 13, mobile emulation, against a local production build (desktop scores are 100 across
+the board). The SEO score on sign-in and tracking is lower by design: those pages are `noindex`
+(a tracking code is a secret, and the sign-in page has nothing to index). It is not a CI gate. To
+re-run:
+
+```bash
+pnpm build && pnpm start &   # needs the dev database, see below
+CHROME_PATH=/path/to/chromium pnpm exec lighthouse http://localhost:3000/ \
+  --chrome-flags="--headless --no-sandbox" --view
+```
 
 ## Local setup
 
 Prerequisites: Node 22, pnpm 10, PostgreSQL 16.
 
-1. Install dependencies: `pnpm install`
-2. Create the database role and databases (as the `postgres` superuser, e.g. `sudo -u postgres psql`):
+1. `pnpm install`
+2. Create the role and databases (as the `postgres` superuser):
 
    ```sql
    CREATE ROLE waybill WITH LOGIN PASSWORD 'waybill' CREATEDB;
@@ -92,30 +164,13 @@ Prerequisites: Node 22, pnpm 10, PostgreSQL 16.
    CREATE DATABASE waybill_test OWNER waybill;
    ```
 
-   The e2e database (`waybill_e2e`) is created automatically by `pnpm test:e2e`.
+   The e2e databases are created automatically by `pnpm test:e2e`.
 
-3. Configure the environment: `cp .env.example .env`, then set `BETTER_AUTH_SECRET`
-   (`openssl rand -base64 32`).
-4. Apply migrations and load the demo data: `pnpm db:migrate && pnpm db:seed`
-5. Start the app: `pnpm dev` and open http://localhost:3000
+3. `cp .env.example .env`, then set `BETTER_AUTH_SECRET` (`openssl rand -base64 32`).
+4. `pnpm db:migrate && pnpm db:seed`, then `pnpm dev` and open http://localhost:3000
 
-## Try it
-
-The seed creates **Demo Freight Co** with 30 shipments in every status. All demo accounts use the
-password `demo-password` (demo only):
-
-| Account                | Role       | What to try                                                    |
-| ---------------------- | ---------- | -------------------------------------------------------------- |
-| `admin@demo.test`      | Admin      | Everything a dispatcher can do                                 |
-| `dispatcher@demo.test` | Dispatcher | Create a shipment, assign the driver, move it through statuses |
-| `driver@demo.test`     | Driver     | Sees only the shipments assigned to them; cannot cancel        |
-
-1. Sign in as the dispatcher, open a shipment and change its status with a customer note and an
-   internal note.
-2. Click **Public tracking page**: the customer sees the note, never the internal one.
-3. Open the same shipment in two tabs and change it in both: the second tab explains the conflict
-   instead of overwriting.
-4. Sign in as the driver to see the restricted view.
+Sign in with the demo accounts above. Deploying: [docs/deployment.md](docs/deployment.md). Using the
+API: [docs/api.md](docs/api.md).
 
 ### Try the live demo locally
 
@@ -140,34 +195,40 @@ delivered it says so; reseed for another run.
 The seed runs once (a re-run is a no-op, because history is never deleted). For fresh dates, run
 `pnpm db:seed --reset`, which wipes and re-creates the local `waybill` database only.
 
-### Tests
-
-- `pnpm test` runs unit tests and integration tests. Integration tests need Postgres running; they
-  wipe and re-migrate `TEST_DATABASE_URL` (the name must end in `_test`).
-- `pnpm test:e2e` runs Playwright. It creates (if needed), wipes and migrates `E2E_DATABASE_URL`
-  (the name must end in `_e2e`), builds the app and starts it on port 3100 against that database.
-  It uses `PLAYWRIGHT_CHROMIUM` if set, then `/opt/pw-browsers/chromium` if present, otherwise
-  the browser from `pnpm exec playwright install chromium`.
-
 ## Scripts
 
-| Script               | Purpose                                                     |
-| -------------------- | ----------------------------------------------------------- |
-| `pnpm dev`           | Next.js dev server                                          |
-| `pnpm build`         | Production build                                            |
-| `pnpm start`         | Serve the production build                                  |
-| `pnpm lint`          | ESLint                                                      |
-| `pnpm typecheck`     | Generate route types, then `tsc --noEmit`                   |
-| `pnpm format:check`  | Prettier check (`pnpm format` to fix)                       |
-| `pnpm test`          | Vitest: unit and integration tests                          |
-| `pnpm test:e2e`      | Playwright end-to-end tests against a production build      |
-| `pnpm db:generate`   | Generate a migration from the Drizzle schema                |
-| `pnpm db:migrate`    | Apply migrations to `DATABASE_URL`                          |
-| `pnpm db:seed`       | Load the demo data (`--reset` recreates the dev database)   |
-| `pnpm auth:generate` | Regenerate the Better Auth tables (must be a no-op change)  |
-| `pnpm simulate`      | Drive the demo trucks so the live map moves (dev DB only)   |
-| `pnpm routes:fetch`  | One-off: re-fetch the committed road route fixture (OSRM)   |
-| `pnpm vercel-build`  | The deploy build: validate env, migrate, seed (demo), build |
+| Script               | Purpose                                                         |
+| -------------------- | --------------------------------------------------------------- |
+| `pnpm dev`           | Next.js dev server                                              |
+| `pnpm build`         | Production build                                                |
+| `pnpm start`         | Serve the production build                                      |
+| `pnpm lint`          | ESLint                                                          |
+| `pnpm typecheck`     | Generate route types, then `tsc --noEmit`                       |
+| `pnpm format:check`  | Prettier check (`pnpm format` to fix)                           |
+| `pnpm test`          | Vitest: unit and integration tests (integration needs Postgres) |
+| `pnpm test:coverage` | The same with v8 coverage                                       |
+| `pnpm test:e2e`      | Playwright against a production build, own database             |
+| `pnpm db:generate`   | Generate a migration from the Drizzle schema                    |
+| `pnpm db:migrate`    | Apply migrations to `DATABASE_URL`                              |
+| `pnpm db:seed`       | Load the demo data (`--reset` recreates the dev database)       |
+| `pnpm auth:generate` | Regenerate the Better Auth tables (must be a no-op change)      |
+| `pnpm simulate`      | Drive the demo trucks so the live map moves (dev DB only)       |
+| `pnpm intake:eval`   | Score the AI intake model on the committed fixtures             |
+| `pnpm routes:fetch`  | One-off: re-fetch the committed road route fixture (OSRM)       |
+| `pnpm vercel-build`  | The deploy build: validate env, migrate, seed (demo), build     |
+
+`pnpm test` wipes and re-migrates `TEST_DATABASE_URL` (the name must end in `_test`).
+`pnpm test:e2e` does the same for `E2E_DATABASE_URL` (ending in `_e2e`), builds the app and starts it
+on port 3100; it uses `PLAYWRIGHT_CHROMIUM` or a preinstalled Chromium if present, otherwise
+Playwright's own browser.
+
+## Documentation
+
+- [Deployment guide](docs/deployment.md): Vercel + Neon setup, demo mode, troubleshooting.
+- [API guide](docs/api.md): API keys, endpoints, ETag and If-Match, errors, rate limits.
+- [Architecture](docs/architecture.md): system design, state machine, multi-tenancy, decisions log.
+- [Engineering notes](docs/engineering-notes.md): the problems worth discussing and the tradeoffs.
+- [Implementation notes](docs/implementation-notes.md): status, roadmap, gotchas, environment.
 
 ## Credits
 
@@ -175,11 +236,4 @@ The seed runs once (a re-run is a no-op, because history is never deleted). For 
   contributors, available under the Open Database License (ODbL).
 - Map tiles by [OpenFreeMap](https://openfreemap.org/) (OpenMapTiles schema).
 - Road routes were computed once with [OSRM](https://project-osrm.org/) and committed as fixtures.
-
-## Documentation
-
-- [Deployment guide](docs/deployment.md): click-by-click Vercel + Neon setup, demo mode, troubleshooting.
-- [API guide](docs/api.md): API keys, endpoints, ETag and If-Match, error format, rate limits.
-- [Architecture](docs/architecture.md): system design, state machine, multi-tenancy, decisions log.
-- [Engineering notes](docs/engineering-notes.md): the problems worth discussing and the tradeoffs.
-- [Implementation notes](docs/implementation-notes.md): status, roadmap, gotchas, environment.
+- Built with [Claude Code](https://claude.com/claude-code).
