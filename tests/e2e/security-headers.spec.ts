@@ -97,3 +97,13 @@ test("every surface runs under the Content-Security-Policy without a violation",
   expect(phoneViolations).toEqual([]);
   await phoneContext.close();
 });
+
+test("robots.txt keeps crawlers on the landing page", async ({ request }) => {
+  const response = await request.get("/robots.txt");
+  expect(response.ok()).toBe(true);
+  const body = await response.text();
+  expect(body).toContain("Allow: /\n");
+  for (const path of ["/dashboard", "/driver", "/track", "/api", "/sign-in", "/sign-up"]) {
+    expect(body).toContain(`Disallow: ${path}\n`);
+  }
+});
