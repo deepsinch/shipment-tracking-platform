@@ -6,6 +6,7 @@ import { RealtimeProvider } from "@/components/realtime/realtime-provider";
 import { SiteHeader } from "@/components/site-header";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { canManageApiKeys } from "@/domain/api-keys";
 import { ROLE_LABELS } from "@/domain/roles";
 import { getCurrentUser, requireAuthContextOn } from "@/server/auth/session";
 
@@ -42,6 +43,11 @@ async function AuthenticatedShell({ children }: { children: React.ReactNode }) {
             <Button asChild variant="ghost">
               <Link href="/dashboard/map">Live map</Link>
             </Button>
+            {canManageApiKeys(context.role) && (
+              <Button asChild variant="ghost">
+                <Link href="/dashboard/settings/api-keys">API keys</Link>
+              </Button>
+            )}
           </nav>
           <span className="hidden text-muted-foreground md:inline">
             {user?.name} · {ROLE_LABELS[context.role]}
