@@ -52,6 +52,8 @@ src/
   contexts a spec creates itself call `blockMapTiles`.
 - Anything with history (users, organizations, shipments) is deactivated, never hard-deleted: foreign keys
   to history are `restrict`.
+- Migrations run during deploy while the previous release may still serve traffic, so every
+  migration is backward compatible with the previous release (expand now, contract in a later release).
 - Database constraints (CHECKs, composite FKs) complement Zod validation; they never replace it.
 - Auth: the real guard is a server-side check (layout or session helper). `proxy.ts` may redirect
   optimistically but is never the only check.

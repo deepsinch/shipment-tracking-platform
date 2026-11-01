@@ -22,7 +22,18 @@ Phase 1 delivered, checkpoint by checkpoint:
 
 **Phase 2 (live tracking) is complete on branch `phase-2-live-tracking`** (checkpoint 5 reached).
 format:check, lint, typecheck, test (212 unit + 188 integration), build and test:e2e (13 specs)
-pass. **Next: Phase 3** (checkpoints below, under "Next: Phase 3"). Phase 2 delivered, checkpoint
+pass. **Next: Phase 4a (deployment), before Phase 3**, on branch `phase-4a-deploy` (the owner chose a live
+demo URL first). Design: `docs/architecture.md`, "Phase 4a: deployment". Checkpoints:
+
+1. **CI and hardening.** GitHub Actions workflow (Postgres service, all six checks, Playwright's own
+   Chromium in CI), runtime env validation with Zod (lazy, clear messages), security headers incl.
+   CSP for OpenFreeMap, `robots.txt`.
+2. **Deploy pipeline and demo mode.** `vercel-build` (validate, migrate on the direct URL, idempotent
+   seed, build), `DATABASE_URL_UNPOOLED` mapping, `vercel.json` cron, demo banner and one-click
+   demo sign-in, `/api/cron/reset-demo`, globally throttled `/api/demo/tick`, and a click-by-click
+   deployment guide for the owner (`docs/deployment.md`).
+
+After Phase 4a: **Phase 3** (checkpoints below, under "Next: Phase 3"), then the rest of Phase 4. Phase 2 delivered, checkpoint
 by checkpoint (design and as-built notes in `docs/architecture.md`, "Phase 2: live tracking"):
 
 1. **[done] Driver app and reassignment.** `/driver` (mobile-first, assigned shipments, big-button status

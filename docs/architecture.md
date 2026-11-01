@@ -499,6 +499,67 @@ maxShipments, clock, log })`. Each tick re-reads every driver's assigned unfinis
   when nothing is left to drive. Assigned shipments still at the sender are picked up, so a
   dispatcher can assign the demo driver to a new booking during a demo and watch it join.
 
+## Phase 4a: deployment (design)
+
+Goal: a live demo URL recruiters can open, built and verified automatically. This section is the
+architect's design; the implementation refines it.
+
+### Hosting
+
+- **Vercel** (Fluid compute) runs the Next.js app, importing the GitHub repository through
+  Vercel's Git integration. Pushes to `main` deploy to production, and pull requests get preview
+  deployments.
+- **Neon** Postgres, connected through the Neon integration in the Vercel marketplace. It injects a
+  pooled `DATABASE_URL` and a direct `DATABASE_URL_UNPOOLED`, and can create a database branch per
+  preview deployment. The app maps the direct URL to `DATABASE_DIRECT_URL` for the realtime
+  `LISTEN` connection and for migrations.
+- No deploy secrets live in GitHub or pass through anyone's chat: the owner connects Vercel and Neon
+  in their dashboards, and the integrations manage credentials.
+
+### Build, migrations and seed
+
+- A `vercel-build` script runs, in order: environment validation, migrations (direct URL), the demo
+  seed (a no-op when the demo organization exists), then `next build`. A failed migration fails
+  the deploy instead of shipping code against an old schema.
+- Migrations run before the new code serves traffic while the old code may still be serving, so
+  every migration must be backward compatible with the previous release (expand, then contract in a
+  later release). This rule goes into `CLAUDE.md`.
+- Runtime environment variables are validated with Zod in one module, with clear messages naming
+  the missing variable. Validation runs on first use, never at import, so the build-time rule
+  (importing must not require env vars) still holds.
+
+### Continuous integration
+
+- GitHub Actions on every push and pull request: format, lint, typecheck, unit and integration tests
+  against a Postgres service container, build, and Playwright end-to-end tests (CI installs
+  Playwright's own Chromium; the config already falls back to it outside this environment).
+- CI only verifies; deploys come from Vercel's Git integration. A failing check is visible on the
+  pull request before merge.
+
+### Demo mode (`DEMO_MODE=true` in production)
+
+- **Banner and credentials.** A small banner says this is a demo whose data resets nightly, and the
+  sign-in page offers the three demo accounts with one click each.
+- **Nightly reset.** A Vercel Cron job (daily, which the Hobby plan allows) calls
+  `/api/cron/reset-demo` with `CRON_SECRET`. It wipes and re-migrates the demo database and re-seeds
+  it, because history cannot be deleted row by row by design. It refuses unless demo mode is on and
+  the secret matches, and the database name guard still applies.
+- **Trucks move while someone watches.** Vercel cannot run a long-lived simulator process, and
+  per-minute cron needs a paid plan. Instead, while the live map or a shipment page is open in demo
+  mode, the client asks `/api/demo/tick` to advance the simulator by one tick. A global throttle in
+  Postgres (one tick per 12 seconds, whatever the number of viewers, using the same conditional
+  upsert pattern as the ping throttle) means trucks move at the same pace for everyone, and nothing
+  runs when nobody is looking. The tick runs the existing simulator core through the real services.
+  The endpoint does nothing unless demo mode is on.
+
+### Hardening
+
+- Security headers: `Content-Security-Policy` (allowing OpenFreeMap tiles and workers),
+  `Referrer-Policy`, `X-Content-Type-Options`, `X-Frame-Options`/`frame-ancestors`, and
+  `Permissions-Policy` allowing geolocation only for the app itself. Vercel adds HSTS.
+- `robots.txt` that disallows the dashboard, driver app and tracking pages; only the landing page is
+  indexable.
+
 ## Decisions log
 
 | #   | Decision                                                                            | Why                                                                                                                        | Alternatives considered                                                                                                           |
@@ -538,3 +599,7 @@ maxShipments, clock, log })`. Each tick re-reads every driver's assigned unfinis
 | 33  | Simulator as pure planner plus service wiring, state re-read every tick             | Every rule enforced by the real services; plans unit tested; dispatchers can intervene mid-run                             | Raw SQL writes (bypass rules and realtime); a long-lived in-memory model of each shipment (goes stale)                            |
 | 34  | Exception ownership read from history (who recorded it)                             | Restarts and `--once` runs never strand a shipment; office holds are respected                                             | In-memory list of the simulator's own exceptions (lost on restart); clearing every exception (overrides the office)               |
 | 35  | 12 s simulator tick with time compression                                           | Clear of the 10 s ping throttle with margin for jitter; compression keeps movement visible                                 | 10 s tick (frequently throttled); faster ticks with dropped pings; real-time speed (trucks barely move)                           |
+| 36  | Vercel + Neon via their integrations, Git-based deploys                             | No deploy tokens to manage; preview databases per pull request; matches the realtime design (direct URL for `LISTEN`)      | Deploy from GitHub Actions with Vercel CLI tokens; a single VPS (more ops, no previews)                                           |
+| 37  | Migrate and seed in `vercel-build`, backward-compatible migrations only             | A failed migration fails the deploy; the seed is idempotent; expand/contract keeps old code working during rollout         | Migrations from a separate CI job (races the Git-triggered deploy); manual migrations                                             |
+| 38  | Demo trucks advance on view via a globally throttled tick endpoint                  | No long-running process or paid cron; nothing runs when nobody watches; same pace for every viewer                         | A permanent simulator worker (extra hosting); per-minute cron (paid plan); a GitHub Actions schedule (coarse, slow)               |
+| 39  | Nightly demo reset by wiping and re-seeding the database                            | History is append-only by design, so a reset recreates the database instead of deleting rows                               | Deleting demo rows (would require weakening the history guarantees)                                                               |
