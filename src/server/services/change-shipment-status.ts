@@ -22,31 +22,38 @@ import { announceShipmentChange } from "./realtime-signals";
 import { visibleShipments } from "./shipment-access";
 import { blankToUndefined, optionalCoordinate, optionalText } from "./validation";
 
-export const changeShipmentStatusSchema = z.object({
-  shipmentId: z.uuid(),
-  /** The `version` the user saw when they opened the form. */
-  expectedVersion: z.coerce.number().int().min(1),
-  toStatus: z.enum(SHIPMENT_STATUSES, { error: "Choose a status" }),
-  /** When it happened in the real world; defaults to now. May be backdated, not future-dated. */
-  occurredAt: blankToUndefined(
-    z.coerce
-      .date({ error: "Enter a valid date and time" })
-      .refine((date) => !isTooFarInFuture(date, new Date()), "The time cannot be in the future"),
-  ),
-  /** Shown to the customer on the public tracking page. */
-  publicNote: optionalText(500),
-  /** Visible to the organization only. */
-  internalNote: optionalText(1000),
-  location: z
-    .object({
-      city: optionalText(100),
-      lat: optionalCoordinate("latitude"),
-      lng: optionalCoordinate("longitude"),
-    })
-    .optional(),
-});
+/** The schema as of `now`, which the future-time check on `occurredAt` compares against. */
+export const changeShipmentStatusSchemaAt = (now: Date) =>
+  z.object({
+    shipmentId: z.uuid(),
+    /** The `version` the user saw when they opened the form. */
+    expectedVersion: z.coerce.number().int().min(1),
+    toStatus: z.enum(SHIPMENT_STATUSES, { error: "Choose a status" }),
+    /** When it happened in the real world; defaults to now. May be backdated, not future-dated. */
+    occurredAt: blankToUndefined(
+      z.coerce
+        .date({ error: "Enter a valid date and time" })
+        .refine((date) => !isTooFarInFuture(date, now), "The time cannot be in the future"),
+    ),
+    /** Shown to the customer on the public tracking page. */
+    publicNote: optionalText(500),
+    /** Visible to the organization only. */
+    internalNote: optionalText(1000),
+    location: z
+      .object({
+        city: optionalText(100),
+        lat: optionalCoordinate("latitude"),
+        lng: optionalCoordinate("longitude"),
+      })
+      .optional(),
+  });
 
-export type ChangeShipmentStatusInput = z.input<typeof changeShipmentStatusSchema>;
+export type ChangeShipmentStatusInput = z.input<ReturnType<typeof changeShipmentStatusSchemaAt>>;
+
+export type ChangeShipmentStatusDeps = {
+  /** The current time (future-time check and default event time). Injectable for tests and the simulator. */
+  now?: () => Date;
+};
 
 export type ChangeShipmentStatusResult =
   | { ok: true; shipment: Shipment; event: ShipmentEvent }
@@ -74,8 +81,10 @@ export type ChangeShipmentStatusResult =
 export async function changeShipmentStatus(
   ctx: AuthContext,
   input: unknown,
+  deps: ChangeShipmentStatusDeps = {},
 ): Promise<ChangeShipmentStatusResult> {
-  const parsed = changeShipmentStatusSchema.safeParse(input);
+  const now = deps.now?.() ?? new Date();
+  const parsed = changeShipmentStatusSchemaAt(now).safeParse(input);
   if (!parsed.success) {
     // A malformed id cannot match any shipment: report it like any other unknown id.
     const badId = parsed.error.issues.some((issue) => issue.path[0] === "shipmentId");
@@ -112,7 +121,6 @@ export async function changeShipmentStatus(
     // Defaulting to now could still land before an event recorded with a slightly fast device
     // clock (see `MAX_CLOCK_SKEW_MS` in `@/domain/device-time`); never order the new event
     // before it.
-    const now = new Date();
     const eventTime =
       occurredAt ?? (latestOccurredAt && latestOccurredAt > now ? latestOccurredAt : now);
 

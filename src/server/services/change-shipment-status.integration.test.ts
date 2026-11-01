@@ -47,6 +47,23 @@ describe("changeShipmentStatus", () => {
     dispatcher = await createTestContext(orgId, "dispatcher");
   });
 
+  it("uses the injected clock for the future-time check and the default event time", async () => {
+    const shipment = await newShipment();
+    const clock = new Date("2030-01-01T12:00:00Z");
+    const base = { shipmentId: shipment.id, expectedVersion: 1, toStatus: "picked_up" };
+
+    const future = await changeShipmentStatus(
+      dispatcher,
+      { ...base, occurredAt: "2030-01-01T12:30:00Z" },
+      { now: () => clock },
+    );
+    expect(future).toMatchObject({ ok: false, reason: "validation" });
+
+    const result = await changeShipmentStatus(dispatcher, base, { now: () => clock });
+    if (!result.ok) throw new Error(JSON.stringify(result));
+    expect(result.event.occurredAt).toEqual(clock);
+  });
+
   it("updates the status, bumps the version and records the event in one go", async () => {
     const shipment = await newShipment({ createdAt: new Date(Date.now() - 2 * 60 * 60_000) });
     const occurredAt = new Date(Date.now() - 30 * 60_000);

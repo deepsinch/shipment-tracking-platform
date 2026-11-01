@@ -84,6 +84,20 @@ describe("assignDriver", () => {
     });
   });
 
+  it("stamps the event with the injected clock", async () => {
+    const shipment = await newShipment();
+    const clock = new Date("2030-01-01T12:00:00Z");
+
+    const result = await assignDriver(
+      dispatcher,
+      { shipmentId: shipment.id, expectedVersion: 1, driverId: driverA.userId },
+      { now: () => clock },
+    );
+
+    if (!result.ok) throw new Error(JSON.stringify(result));
+    expect(result.event.occurredAt).toEqual(clock);
+  });
+
   it("reassigns to another driver, recording both drivers", async () => {
     const shipment = await newShipment({ assignedDriverId: driverA.userId });
 
