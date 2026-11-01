@@ -7,7 +7,7 @@ import { resolveAuthUrls, type AuthUrlSource } from "./auth/base-url";
 /**
  * Runtime environment for the app, validated with Zod.
  *
- * Validation is lazy: each group (database, auth, realtime, demo) is parsed the first time code
+ * Validation is lazy: each group (database, auth, realtime, demo, webhooks) is parsed the first time code
  * reads it, and cached. Importing this module never throws, so `next build` and modules that are
  * only imported (never run) work without any environment variables. A missing or malformed
  * variable fails the first request that needs it, with a message naming the variable (never its
@@ -170,11 +170,44 @@ const demoSchema = z
       .filter((name) => name !== ""),
   }));
 
+const webhooksSchema = z
+  .object({
+    WEBHOOKS_ALLOW_LOCAL_TARGETS: z.preprocess(
+      (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+      z.enum(["true", "false"], { error: 'must be "true" or "false"' }).optional(),
+    ),
+    // Read only to refuse the flag where it must never be on.
+    VERCEL: optionalString,
+    DEMO_MODE: optionalString,
+  })
+  .superRefine((env, ctx) => {
+    if (env.WEBHOOKS_ALLOW_LOCAL_TARGETS !== "true") return;
+    if (env.VERCEL || env.DEMO_MODE === "true") {
+      ctx.addIssue({
+        code: "custom",
+        path: ["WEBHOOKS_ALLOW_LOCAL_TARGETS"],
+        message:
+          "must not be set on Vercel or in demo mode: it lets webhooks reach localhost " +
+          "(development and tests only)",
+      });
+    }
+  })
+  .transform((env) => ({
+    /**
+     * Development and tests only: lets webhook URLs point at http://localhost, so a test
+     * receiver on the same machine works. Private ranges and cloud metadata addresses stay
+     * refused. Rejected on Vercel and in demo mode (see `superRefine`), so a hosted deployment
+     * cannot be talked into reaching its own network.
+     */
+    allowLocalTargets: env.WEBHOOKS_ALLOW_LOCAL_TARGETS === "true",
+  }));
+
 const groups = {
   database: databaseSchema,
   auth: authSchema,
   realtime: realtimeSchema,
   demo: demoSchema,
+  webhooks: webhooksSchema,
 };
 
 type Groups = typeof groups;
@@ -213,6 +246,7 @@ export function createEnv(source: Source): ServerEnv {
     auth: { get: lazy("auth"), enumerable: true },
     realtime: { get: lazy("realtime"), enumerable: true },
     demo: { get: lazy("demo"), enumerable: true },
+    webhooks: { get: lazy("webhooks"), enumerable: true },
   });
 }
 

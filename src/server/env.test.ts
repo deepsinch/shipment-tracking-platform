@@ -210,6 +210,38 @@ describe("demo", () => {
   });
 });
 
+describe("webhooks", () => {
+  it("refuses local targets by default", () => {
+    expect(createEnv({}).webhooks).toEqual({ allowLocalTargets: false });
+    expect(createEnv({ WEBHOOKS_ALLOW_LOCAL_TARGETS: "" }).webhooks.allowLocalTargets).toBe(false);
+    expect(createEnv({ WEBHOOKS_ALLOW_LOCAL_TARGETS: "false" }).webhooks.allowLocalTargets).toBe(
+      false,
+    );
+  });
+
+  it("allows them when switched on locally", () => {
+    expect(createEnv({ WEBHOOKS_ALLOW_LOCAL_TARGETS: "true" }).webhooks.allowLocalTargets).toBe(
+      true,
+    );
+  });
+
+  it("refuses the flag on Vercel and in demo mode, so a hosted app cannot reach localhost", () => {
+    const flag = { WEBHOOKS_ALLOW_LOCAL_TARGETS: "true" };
+    expect(() => createEnv({ ...flag, VERCEL: "1" }).webhooks).toThrow(
+      /WEBHOOKS_ALLOW_LOCAL_TARGETS must not be set on Vercel or in demo mode/,
+    );
+    expect(() => createEnv({ ...flag, DEMO_MODE: "true" }).webhooks).toThrow(
+      /WEBHOOKS_ALLOW_LOCAL_TARGETS must not be set/,
+    );
+  });
+
+  it("rejects anything but true or false", () => {
+    expect(() => createEnv({ WEBHOOKS_ALLOW_LOCAL_TARGETS: "yes" }).webhooks).toThrow(
+      /WEBHOOKS_ALLOW_LOCAL_TARGETS must be "true" or "false"/,
+    );
+  });
+});
+
 describe("validateEnv", () => {
   it("returns every group for a valid environment", () => {
     const env = validateEnv(valid);
