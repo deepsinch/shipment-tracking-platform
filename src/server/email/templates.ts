@@ -20,6 +20,8 @@ export type StatusEmailInput = {
   destinationCity: string;
   /** The event's public note, if any. */
   publicNote: string | null;
+  /** The printed name of whoever received a delivery with proof; null otherwise. */
+  signedBy: string | null;
   trackingUrl: string;
   unsubscribeUrl: string;
 };
@@ -64,6 +66,7 @@ export function renderStatusEmail(input: StatusEmailInput): RenderedEmail {
     `Status: ${status}`,
     `Tracking code: ${input.trackingCode}`,
     `Route: ${route}`,
+    ...(input.signedBy ? [`Signed by: ${input.signedBy}`] : []),
     ...(input.publicNote ? [`Note from ${input.companyName}: ${input.publicNote}`] : []),
     "",
     `Follow your shipment: ${input.trackingUrl}`,
@@ -84,7 +87,12 @@ export function renderStatusEmail(input: StatusEmailInput): RenderedEmail {
 <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 16px;font-size:14px;">
 <tr><td style="padding:2px 16px 2px 0;color:#52525b;">Status</td><td><strong>${e(status)}</strong></td></tr>
 <tr><td style="padding:2px 16px 2px 0;color:#52525b;">Tracking code</td><td style="font-family:monospace;">${e(input.trackingCode)}</td></tr>
-<tr><td style="padding:2px 16px 2px 0;color:#52525b;">Route</td><td>${e(route)}</td></tr>
+<tr><td style="padding:2px 16px 2px 0;color:#52525b;">Route</td><td>${e(route)}</td></tr>${
+    input.signedBy
+      ? `
+<tr><td style="padding:2px 16px 2px 0;color:#52525b;">Signed by</td><td>${e(input.signedBy)}</td></tr>`
+      : ""
+  }
 </table>${
     input.publicNote
       ? `

@@ -152,11 +152,11 @@ describe("getShipmentPositions", () => {
     expect(positionsOf(await scoped())).toMatchObject([{ status: "exception", lat: 51.3 }]);
 
     await change(2, "out_for_delivery");
-    const delivered = await changeShipmentStatus(driver, {
-      shipmentId: shipment.id,
-      expectedVersion: 3,
-      toStatus: "delivered",
-    });
+    const delivered = await changeShipmentStatus(
+      driver,
+      { shipmentId: shipment.id, expectedVersion: 3, toStatus: "delivered" },
+      { proof: { recipientName: "Ada Recipient", signature: null, photoKey: null } },
+    );
     expect(delivered.ok).toBe(true);
     expect(positionsOf(await scoped())).toEqual([]);
   });

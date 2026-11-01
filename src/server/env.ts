@@ -2,6 +2,7 @@ import "server-only";
 
 import { z } from "zod";
 
+import { photoCaptureAvailable } from "@/domain/delivery-proof";
 import { selectEmailTransport } from "@/domain/email";
 
 import { resolveAuthUrls, type AuthUrlSource } from "./auth/base-url";
@@ -9,7 +10,7 @@ import { resolveAuthUrls, type AuthUrlSource } from "./auth/base-url";
 /**
  * Runtime environment for the app, validated with Zod.
  *
- * Validation is lazy: each group (database, auth, realtime, demo, webhooks, email) is parsed the first time code
+ * Validation is lazy: each group (database, auth, realtime, demo, webhooks, email, photos) is parsed the first time code
  * reads it, and cached. Importing this module never throws, so `next build` and modules that are
  * only imported (never run) work without any environment variables. A missing or malformed
  * variable fails the first request that needs it, with a message naming the variable (never its
@@ -239,6 +240,22 @@ const emailSchema = z
     }),
   }));
 
+const photosSchema = z
+  .object({
+    // Set by the Vercel Blob integration (Marketplace) when a store is connected to the project.
+    BLOB_READ_WRITE_TOKEN: optionalString,
+    // Read to switch photo capture off in demo mode.
+    DEMO_MODE: optionalString,
+  })
+  .transform((env) => ({
+    blobToken: env.BLOB_READ_WRITE_TOKEN,
+    /** Photo capture exists only with a token and never in demo mode (no visitor files are kept). */
+    enabled: photoCaptureAvailable({
+      demoMode: env.DEMO_MODE === "true",
+      blobToken: env.BLOB_READ_WRITE_TOKEN,
+    }),
+  }));
+
 const groups = {
   database: databaseSchema,
   auth: authSchema,
@@ -246,6 +263,7 @@ const groups = {
   demo: demoSchema,
   webhooks: webhooksSchema,
   email: emailSchema,
+  photos: photosSchema,
 };
 
 type Groups = typeof groups;
@@ -286,6 +304,7 @@ export function createEnv(source: Source): ServerEnv {
     demo: { get: lazy("demo"), enumerable: true },
     webhooks: { get: lazy("webhooks"), enumerable: true },
     email: { get: lazy("email"), enumerable: true },
+    photos: { get: lazy("photos"), enumerable: true },
   });
 }
 

@@ -2,6 +2,7 @@ import "server-only";
 
 import { and, eq } from "drizzle-orm";
 
+import type { DeliveryProofSummary } from "@/domain/delivery-proof";
 import { shouldEmailForStatus } from "@/domain/email";
 import type { Transaction } from "@/server/db/client";
 import {
@@ -22,12 +23,14 @@ import { trackingUrlFor, unsubscribeUrlFor } from "@/server/email/unsubscribe";
  * Skipped silently when the status is not one customers are told about, when the shipment has no
  * recipient address, or when that address opted out of this organization's emails. The message is
  * rendered here and stored as it will be sent. Only the event's public note goes in; the
- * template has no way to receive the internal note.
+ * template has no way to receive the internal note. A delivery with proof says who signed for it
+ * (the printed name only, never the signature or the photo).
  */
 export async function enqueueStatusEmail(
   tx: Transaction,
   shipment: Shipment,
   event: Pick<ShipmentEvent, "id" | "publicNote">,
+  proof: DeliveryProofSummary | null = null,
   queuedAt: Date = new Date(),
 ): Promise<void> {
   const recipient = shipment.recipientEmail?.trim().toLowerCase();
@@ -59,6 +62,7 @@ export async function enqueueStatusEmail(
     originCity: shipment.originCity,
     destinationCity: shipment.destinationCity,
     publicNote: event.publicNote,
+    signedBy: proof?.recipientName ?? null,
     trackingUrl: trackingUrlFor(shipment.trackingCode),
     unsubscribeUrl: unsubscribeUrlFor({
       organizationId: shipment.organizationId,

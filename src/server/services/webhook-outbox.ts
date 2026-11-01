@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 
 import { and, arrayContains, eq, inArray } from "drizzle-orm";
 
+import type { DeliveryProofSummary } from "@/domain/delivery-proof";
 import type { WebhookEventType } from "@/domain/webhooks";
 import type { Transaction } from "@/server/db/client";
 import {
@@ -75,9 +76,10 @@ export function enqueueStatusChanged(
   tx: Transaction,
   shipment: Shipment,
   event: StatusChangeEvent & Pick<ShipmentEvent, "recordedAt">,
+  proof: DeliveryProofSummary | null = null,
 ): Promise<void> {
   return enqueue(tx, shipment.organizationId, "shipment.status_changed", event.recordedAt, () =>
-    toStatusChangedData(shipment, event),
+    toStatusChangedData(shipment, event, proof),
   );
 }
 

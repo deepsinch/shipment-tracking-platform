@@ -212,6 +212,7 @@ describe("OpenAPI document", () => {
         shipment,
         assignedDriverName: "Dries",
         events: [event],
+        proof: null,
       });
       expect(propertyNames(schema("ShipmentDetail"))).toEqual(keys(projected));
     });
@@ -223,6 +224,7 @@ describe("OpenAPI document", () => {
         origin: { city: "c", country: "NL" },
         destination: { city: "c", country: "BE" },
         promisedDeliveryAt: null,
+        signedBy: null,
         timeline: [
           { type: "created", status: "created", occurredAt: now, city: null, publicNote: null },
         ],

@@ -3,12 +3,19 @@ import "server-only";
 import { and, eq, isNotNull, max, sql } from "drizzle-orm";
 import { z } from "zod";
 
+import { summarizeProof, type DeliveryProofRecord } from "@/domain/delivery-proof";
 import { isTooFarInFuture } from "@/domain/device-time";
-import { canSetStatus } from "@/domain/shipment-permissions";
+import { canSetStatus, requiresDeliveryProof } from "@/domain/shipment-permissions";
 import { canTransition, SHIPMENT_STATUSES, type ShipmentStatus } from "@/domain/shipment-status";
 import type { AuthContext } from "@/server/auth/auth-context";
 import { getDb, type Transaction } from "@/server/db/client";
-import { shipmentEvents, shipments, type Shipment, type ShipmentEvent } from "@/server/db/schema";
+import {
+  deliveryProofs,
+  shipmentEvents,
+  shipments,
+  type Shipment,
+  type ShipmentEvent,
+} from "@/server/db/schema";
 
 import {
   forbidden,
@@ -55,6 +62,13 @@ export type ChangeShipmentStatusInput = z.input<ReturnType<typeof changeShipment
 export type ChangeShipmentStatusDeps = {
   /** The current time (future-time check and default event time). Injectable for tests and the simulator. */
   now?: () => Date;
+  /**
+   * Proof of delivery, stored in the same transaction as the `delivered` event (so a rolled-back
+   * delivery leaves no proof). Only with `toStatus: "delivered"`; callers build it with
+   * `deliverShipment`, which validates it and stores the photo first. A driver cannot mark a
+   * shipment delivered without one; staff and API keys can (recorded as "no proof").
+   */
+  proof?: DeliveryProofRecord;
 };
 
 export type ChangeShipmentStatusResult =
@@ -75,6 +89,9 @@ export type ChangeShipmentStatusResult =
  * only shipments assigned to them, and never to `cancelled` (forbidden, see `canSetStatus`).
  * Shipments outside the caller's scope are not found, so a driver cannot learn which exist.
  *
+ * A delivery by a driver needs proof (the recipient's printed name at least); `deps.proof` carries
+ * it, and it is written with the event or not at all.
+ *
  * `occurredAt` may be backdated, but not before the shipment's latest status event, so the status
  * timeline (ordered by occurred_at) always follows the state machine. Events without a status
  * (driver assignments) do not count: a driver who was offline may record a pickup that happened
@@ -94,6 +111,13 @@ export async function changeShipmentStatus(
   }
   const { shipmentId, expectedVersion, toStatus, occurredAt, publicNote, internalNote, location } =
     parsed.data;
+  const proof = deps.proof;
+  if (proof && toStatus !== "delivered") {
+    return fieldFailure("proof", "Proof of delivery only goes with a delivery");
+  }
+  if (!proof && toStatus === "delivered" && requiresDeliveryProof(ctx.role)) {
+    return fieldFailure("recipientName", "Enter the recipient's printed name");
+  }
 
   return getDb().transaction(async (tx): Promise<ChangeShipmentStatusResult> => {
     const current = await findVisibleShipment(tx, ctx, shipmentId);
@@ -165,12 +189,28 @@ export async function changeShipmentStatus(
         internalNote,
       })
       .returning();
+    if (proof) {
+      await tx.insert(deliveryProofs).values({
+        organizationId: ctx.organizationId,
+        shipmentId,
+        eventId: event!.id,
+        recipientName: proof.recipientName,
+        signature: proof.signature,
+        photoKey: proof.photoKey,
+        capturedBy: ctx.userId,
+      });
+    }
+    const proofSummary = proof ? summarizeProof(proof) : null;
     await announceShipmentChange(tx, updated, "status");
-    await enqueueStatusChanged(tx, updated, event!);
-    await enqueueStatusEmail(tx, updated, event!);
+    await enqueueStatusChanged(tx, updated, event!, proofSummary);
+    await enqueueStatusEmail(tx, updated, event!, proofSummary);
 
     return { ok: true, shipment: updated, event: event! };
   });
+}
+
+function fieldFailure(field: string, message: string): ValidationFailure {
+  return { ok: false, reason: "validation", fieldErrors: { [field]: [message] } };
 }
 
 async function findVisibleShipment(

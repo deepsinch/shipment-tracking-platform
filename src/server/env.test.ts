@@ -281,6 +281,23 @@ describe("email", () => {
   });
 });
 
+describe("photos", () => {
+  it("are off without a Blob token", () => {
+    expect(createEnv({}).photos).toEqual({ blobToken: undefined, enabled: false });
+    expect(createEnv({ BLOB_READ_WRITE_TOKEN: "" }).photos.enabled).toBe(false);
+  });
+
+  it("are on with a token", () => {
+    expect(createEnv({ BLOB_READ_WRITE_TOKEN: "vercel_blob_rw_x" }).photos.enabled).toBe(true);
+  });
+
+  it("are never on in demo mode, even with a token left over", () => {
+    expect(
+      createEnv({ BLOB_READ_WRITE_TOKEN: "vercel_blob_rw_x", DEMO_MODE: "true" }).photos.enabled,
+    ).toBe(false);
+  });
+});
+
 describe("validateEnv", () => {
   it("returns every group for a valid environment", () => {
     const env = validateEnv(valid);

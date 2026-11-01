@@ -105,6 +105,7 @@ export function toApiTracking(tracking: PublicTracking) {
     origin: { city: tracking.origin.city, country: tracking.origin.country },
     destination: { city: tracking.destination.city, country: tracking.destination.country },
     promisedDeliveryAt: isoOrNull(tracking.promisedDeliveryAt),
+    signedBy: tracking.signedBy,
     timeline: tracking.timeline.map((event) => ({
       type: event.type,
       status: event.status,

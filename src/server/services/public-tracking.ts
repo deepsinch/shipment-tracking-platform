@@ -6,7 +6,7 @@ import { PUBLIC_SHIPMENT_EVENT_TYPES, type PublicShipmentEventType } from "@/dom
 import type { ShipmentStatus } from "@/domain/shipment-status";
 import { normalizeTrackingCode } from "@/domain/tracking-code";
 import { getDb } from "@/server/db/client";
-import { shipmentEvents, shipments } from "@/server/db/schema";
+import { deliveryProofs, shipmentEvents, shipments } from "@/server/db/schema";
 
 /**
  * What anyone holding a tracking code may see. Built from an explicit column list (never
@@ -22,6 +22,11 @@ export type PublicTracking = {
   origin: { city: string; country: string };
   destination: { city: string; country: string };
   promisedDeliveryAt: Date | null;
+  /**
+   * The printed name of whoever signed for a delivered shipment, or null (not delivered, or
+   * delivered without proof). Only the name: the signature and the photo are never public.
+   */
+  signedBy: string | null;
   timeline: PublicTrackingEvent[];
 };
 
@@ -80,12 +85,25 @@ export async function getPublicTracking(code: string): Promise<PublicTracking | 
   // The WHERE clause above admits only public types; the column type cannot know that.
   const timeline = rows as PublicTrackingEvent[];
 
+  const signedBy = shipment.status === "delivered" ? await findSignedBy(shipment.id) : null;
+
   return {
     trackingCode: shipment.trackingCode,
     status: shipment.status,
     origin: { city: shipment.originCity, country: shipment.originCountry },
     destination: { city: shipment.destinationCity, country: shipment.destinationCountry },
     promisedDeliveryAt: shipment.promisedDeliveryAt,
+    signedBy,
     timeline,
   };
+}
+
+/** The recipient's printed name from the delivery proof: the one column of it that is public. */
+async function findSignedBy(shipmentId: string): Promise<string | null> {
+  const [proof] = await getDb()
+    .select({ recipientName: deliveryProofs.recipientName })
+    .from(deliveryProofs)
+    .where(eq(deliveryProofs.shipmentId, shipmentId))
+    .limit(1);
+  return proof?.recipientName ?? null;
 }

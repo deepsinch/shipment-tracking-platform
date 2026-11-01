@@ -12,6 +12,7 @@ const input: StatusEmailInput = {
   originCity: "Rotterdam",
   destinationCity: "Antwerp",
   publicNote: "Driver is 10 minutes away",
+  signedBy: null,
   trackingUrl: "https://waybill.example.com/track/WB-ABCD-1234",
   unsubscribeUrl: "https://waybill.example.com/unsubscribe/abc.def",
 };
@@ -33,6 +34,23 @@ describe("renderStatusEmail", () => {
         expect(body).toContain(expected);
       }
     }
+  });
+
+  it("says who signed for a delivery with proof, and says nothing without", () => {
+    const delivered = { ...input, status: "delivered" as const, signedBy: "Ada R." };
+    const { text, html } = renderStatusEmail(delivered);
+    expect(text).toContain("Signed by: Ada R.");
+    expect(html).toContain("Signed by</td><td>Ada R.</td>");
+
+    const without = renderStatusEmail({ ...delivered, signedBy: null });
+    expect(without.text).not.toContain("Signed by");
+    expect(without.html).not.toContain("Signed by");
+  });
+
+  it("escapes the signer's name in the HTML", () => {
+    const { html } = renderStatusEmail({ ...input, signedBy: '<script>alert("x")</script>' });
+    expect(html).not.toContain("<script>");
+    expect(html).toContain("&lt;script&gt;");
   });
 
   it("omits the note line when there is no public note", () => {

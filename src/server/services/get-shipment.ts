@@ -14,6 +14,7 @@ import {
   type ShipmentEvent,
 } from "@/server/db/schema";
 
+import { findDeliveryProof, type DeliveryProofView } from "./delivery-proof";
 import { notFound, type NotFound } from "./results";
 import { visibleShipments } from "./shipment-access";
 
@@ -31,6 +32,8 @@ export type ShipmentDetail = {
   assignedDriverName: string | null;
   /** In real-world order (occurred_at), oldest first. */
   events: ShipmentEventWithActor[];
+  /** The delivery's proof; null for a shipment without one (not delivered, or marked by the office). */
+  proof: DeliveryProofView | null;
 };
 
 export type GetShipmentResult = ({ ok: true } & ShipmentDetail) | NotFound;
@@ -80,7 +83,12 @@ export async function getShipment(ctx: AuthContext, id: string): Promise<GetShip
     return { ...event, assignment: { fromName: nameOf(fromDriverId), toName: nameOf(toDriverId) } };
   });
 
-  return { ok: true, shipment, assignedDriverName, events };
+  const proof =
+    shipment.status === "delivered"
+      ? await findDeliveryProof(ctx.organizationId, shipment.id)
+      : null;
+
+  return { ok: true, shipment, assignedDriverName, events, proof };
 }
 
 /** Names of the drivers mentioned by `driver_assigned` events, in one query. */

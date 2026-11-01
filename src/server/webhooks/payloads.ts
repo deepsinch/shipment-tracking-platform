@@ -1,3 +1,4 @@
+import type { DeliveryProofSummary } from "@/domain/delivery-proof";
 import type { WebhookEventType } from "@/domain/webhooks";
 import { toApiShipment } from "@/server/api/projections";
 import type { Shipment, ShipmentEvent } from "@/server/db/schema";
@@ -48,7 +49,16 @@ export type StatusChangeEvent = Pick<
   | "publicNote"
 >;
 
-export function toStatusChangedData(shipment: Shipment, event: StatusChangeEvent) {
+/**
+ * `proof` is a delivery's summary, or null for a delivery without proof; it is only on the
+ * `delivered` change. A summary, never the evidence: the recipient's printed name and whether a
+ * signature and a photo exist. The signature and the photo stay in the application.
+ */
+export function toStatusChangedData(
+  shipment: Shipment,
+  event: StatusChangeEvent,
+  proof: DeliveryProofSummary | null = null,
+) {
   const hasLocation =
     event.locationCity !== null || event.locationLat !== null || event.locationLng !== null;
   return {
@@ -61,6 +71,17 @@ export function toStatusChangedData(shipment: Shipment, event: StatusChangeEvent
         ? { city: event.locationCity, lat: event.locationLat, lng: event.locationLng }
         : null,
       publicNote: event.publicNote,
+      ...(event.toStatus === "delivered"
+        ? {
+            proof: proof
+              ? {
+                  recipientName: proof.recipientName,
+                  hasSignature: proof.hasSignature,
+                  hasPhoto: proof.hasPhoto,
+                }
+              : null,
+          }
+        : {}),
     },
   };
 }

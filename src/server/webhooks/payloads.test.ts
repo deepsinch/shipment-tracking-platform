@@ -102,6 +102,63 @@ describe("webhook payloads", () => {
     expect(data.change.location).toBeNull();
   });
 
+  describe("proof of delivery", () => {
+    const delivered = {
+      fromStatus: "out_for_delivery" as const,
+      toStatus: "delivered" as const,
+      occurredAt: new Date("2026-03-02T10:00:00Z"),
+      locationCity: null,
+      locationLat: null,
+      locationLng: null,
+      publicNote: null,
+    };
+
+    it("a delivery carries only the name and whether a signature and a photo exist", () => {
+      const data = toStatusChangedData(shipment, delivered, {
+        recipientName: "Ada R.",
+        hasSignature: true,
+        hasPhoto: false,
+      });
+      expect(keys(data.change)).toEqual([
+        "fromStatus",
+        "location",
+        "occurredAt",
+        "proof",
+        "publicNote",
+        "toStatus",
+      ]);
+      expect(data.change.proof).toEqual({
+        recipientName: "Ada R.",
+        hasSignature: true,
+        hasPhoto: false,
+      });
+      expect(keys(data.change.proof!)).toEqual(["hasPhoto", "hasSignature", "recipientName"]);
+    });
+
+    it("copies the three fields by name, so a richer proof object leaks nothing", () => {
+      const rich = {
+        recipientName: "Ada R.",
+        hasSignature: true,
+        hasPhoto: true,
+        signature: { aspect: 2, strokes: [[[0.1, 0.1]]] },
+        photoKey: "delivery-proofs/org/ship/x.jpg",
+      };
+      const data = toStatusChangedData(shipment, delivered, rich);
+      expect(JSON.stringify(data)).not.toContain("strokes");
+      expect(JSON.stringify(data)).not.toContain("delivery-proofs/");
+      expect(keys(data.change.proof!)).toEqual(["hasPhoto", "hasSignature", "recipientName"]);
+    });
+
+    it("a delivery without proof says so with null", () => {
+      expect(toStatusChangedData(shipment, delivered).change.proof).toBeNull();
+    });
+
+    it("other changes have no proof key at all", () => {
+      const data = toStatusChangedData(shipment, { ...delivered, toStatus: "in_transit" });
+      expect(keys(data.change)).not.toContain("proof");
+    });
+  });
+
   it("shipment.driver_assigned names drivers and never carries their ids", () => {
     const data = toDriverAssignedData(shipment, { fromName: null, toName: "Dries Driver" });
     expect(keys(data)).toEqual(["assignment", "shipment", "version"]);

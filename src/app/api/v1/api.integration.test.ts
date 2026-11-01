@@ -580,6 +580,7 @@ describe("public API", () => {
         "destination",
         "origin",
         "promisedDeliveryAt",
+        "signedBy",
         "status",
         "timeline",
         "trackingCode",

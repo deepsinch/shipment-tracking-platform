@@ -242,6 +242,11 @@ const schemas = {
     origin: place,
     destination: place,
     promisedDeliveryAt: nullableDateTime,
+    signedBy: {
+      ...nullableString,
+      description:
+        "Printed name of whoever signed for a delivered shipment; null when not delivered or delivered without proof.",
+    },
     timeline: {
       type: "array",
       items: object({
