@@ -1,4 +1,6 @@
-# Verifies every push and pull request: the same six checks as a checkpoint's done criteria.
+# Verifies every push to any branch: the same six checks as a checkpoint's done criteria. Pull
+# requests from this repository show the checks of their head commit, so a separate
+# `pull_request` trigger would only run everything twice.
 # CI only verifies; deploys come from Vercel's Git integration (docs/architecture.md, Phase 4a).
 #
 # Actions are pinned to major tags of first-party (actions/*) and well-known (pnpm/*) actions:
@@ -9,7 +11,6 @@ name: CI
 
 on:
   push:
-  pull_request:
 
 # A newer push to the same branch or pull request cancels the run it supersedes.
 concurrency:

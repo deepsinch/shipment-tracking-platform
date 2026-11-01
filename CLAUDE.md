@@ -48,7 +48,7 @@ src/
 - Forms whose input a live refresh could wipe carry `data-unsaved-guard`.
 - Maps (MapLibre) are client-only and supplementary: every map has a text equivalent that keyboard
   and screen-reader users can use, and the public page never shows a map or coordinates.
-- E2E specs import `test` from `tests/e2e/fixtures.ts` (map tiles blocked, no network dependency);
+- E2E specs (never run with `E2E_MAP_TILES=live` in CI) import `test` from `tests/e2e/fixtures.ts` (map tiles blocked, no network dependency);
   contexts a spec creates itself call `blockMapTiles`.
 - Anything with history (users, organizations, shipments) is deactivated, never hard-deleted: foreign keys
   to history are `restrict`.
@@ -63,6 +63,10 @@ src/
   `datetime-local` as UTC) until per-organization time zones exist.
 - Server Actions map every service result kind to a user-facing state (never a generic error), and
   echo back non-secret submitted values so nothing typed is lost.
+- App and server code read environment variables only through `src/server/env.ts` (scripts and test
+  setup may read their own).
+- Any new external origin (API, CDN, tiles) is added to `src/lib/security-headers.ts`; the CSP e2e
+  spec fails on violations. `dangerouslySetInnerHTML` is banned by lint (part of the CSP tradeoff).
 - Importing a module must not require environment variables (e.g. the DB pool is created lazily), so
   `next build` works without a database.
 
@@ -95,7 +99,9 @@ src/
 ## Workflow
 
 - The main session acts as architect and reviewer.
-- Implementation is delegated to an Opus subagent at medium effort.
+- Implementation is delegated to a Sonnet subagent: medium effort by default, high effort for
+  checkpoints with security or concurrency guarantees (auth, API keys, webhooks, uploads, throttles).
+  (Phases 1, 2 and Phase 4a checkpoint 1 were implemented by Opus at medium effort.)
 - One branch per phase (`phase-N-<name>`), small logical commits.
 - Work is split into checkpoints (listed in `docs/implementation-notes.md`). The implementor finishes one
   checkpoint with all checks green and a clean tree, commits, stops and reports. It never pushes.
