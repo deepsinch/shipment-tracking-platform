@@ -1,7 +1,7 @@
 import "server-only";
 
 import { getAuth } from "./auth";
-import { resolveAuthContext, type AuthContext } from "./auth-context";
+import { resolveAuthContext, type MemberAuthContext } from "./auth-context";
 
 /**
  * The AuthContext for a request's headers (its session cookie), or null when there is no valid
@@ -11,7 +11,9 @@ import { resolveAuthContext, type AuthContext } from "./auth-context";
  * Route handlers call it with `request.headers` directly, which also lets tests invoke them with
  * a constructed `Request`, outside Next's request scope.
  */
-export async function getAuthContextFromHeaders(headers: Headers): Promise<AuthContext | null> {
+export async function getAuthContextFromHeaders(
+  headers: Headers,
+): Promise<MemberAuthContext | null> {
   const session = await getAuth().api.getSession({ headers });
   if (!session) return null;
   return resolveAuthContext({

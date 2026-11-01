@@ -1,4 +1,4 @@
-import type { Role } from "./roles";
+import type { ActorRole } from "./roles";
 import type { ShipmentStatus } from "./shipment-status";
 
 /**
@@ -24,7 +24,7 @@ export function isLocationSharingStatus(status: ShipmentStatus): boolean {
 }
 
 /** Only drivers report positions, and only for their own assignments (scope is the service's). */
-export function canRecordLocation(role: Role): boolean {
+export function canRecordLocation(role: ActorRole): boolean {
   return role === "driver";
 }
 

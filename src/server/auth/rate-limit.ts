@@ -8,7 +8,7 @@ import { getDb } from "@/server/db/client";
 import { authRateLimits } from "@/server/db/schema";
 
 /**
- * Fixed-window rate limits for sign-in and sign-up, stored in Postgres.
+ * Fixed-window rate limits for sign-in, sign-up and the public API, stored in Postgres.
  *
  * Better Auth has its own limiter, but it only covers requests through its HTTP handler; our
  * Server Actions call `auth.api.*` directly, so they need their own. Postgres (not process memory)
@@ -29,6 +29,12 @@ export const RATE_LIMITS = {
   signInPerIp: { name: "sign-in:ip", limit: 30, windowMs: 15 * MINUTE },
   /** Per IP, every submission: mass account creation. */
   signUpPerIp: { name: "sign-up:ip", limit: 10, windowMs: 60 * MINUTE },
+  /** Per API key, every request: one integration cannot starve the database for the rest. */
+  apiPerKey: { name: "api:key", limit: 120, windowMs: MINUTE },
+  /** Per IP, every request without a valid key: guessing keys, or hammering with a revoked one. */
+  apiInvalidKeyPerIp: { name: "api:invalid-key:ip", limit: 30, windowMs: MINUTE },
+  /** Per IP, public tracking lookups through the API (no key to count them against). */
+  apiTrackingPerIp: { name: "api:tracking:ip", limit: 60, windowMs: MINUTE },
 } as const satisfies Record<string, RateLimitRule>;
 
 export type RateLimitStatus = { limited: false } | { limited: true; retryAfterMs: number };

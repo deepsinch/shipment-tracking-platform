@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { ROLES, type Role } from "./roles";
+import { API_ROLE, ROLES, type ActorRole } from "./roles";
 import {
   canAssignDrivers,
   canChangeDriver,
@@ -13,7 +13,7 @@ import { SHIPMENT_STATUSES } from "./shipment-status";
 
 // Restated independently of the implementation, so an accidental change fails loudly.
 const EXPECTED: Record<
-  Role,
+  ActorRole,
   {
     create: boolean;
     assign: boolean;
@@ -24,10 +24,12 @@ const EXPECTED: Record<
   admin: { create: true, assign: true, seesAll: true, cancel: true },
   dispatcher: { create: true, assign: true, seesAll: true, cancel: true },
   driver: { create: false, assign: false, seesAll: false, cancel: false },
+  // An API key is a dispatcher without a person behind it (its scopes narrow it further).
+  api: { create: true, assign: true, seesAll: true, cancel: true },
 };
 
 describe("shipment permissions", () => {
-  it.each(ROLES)("%s", (role) => {
+  it.each([...ROLES, API_ROLE])("%s", (role) => {
     expect(canCreateShipments(role)).toBe(EXPECTED[role].create);
     expect(canAssignDrivers(role)).toBe(EXPECTED[role].assign);
     expect(seesAllOrganizationShipments(role)).toBe(EXPECTED[role].seesAll);
