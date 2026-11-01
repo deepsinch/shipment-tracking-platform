@@ -54,7 +54,7 @@ export function NewShipmentForm({ drivers }: { drivers: DriverOption[] }) {
                 label="Email (optional)"
                 type="email"
                 autoComplete="off"
-                description="For delivery updates in a later release."
+                description="We email delivery updates here. The customer can stop them with a link in the email."
               />
               <TextField
                 {...field("reference")}

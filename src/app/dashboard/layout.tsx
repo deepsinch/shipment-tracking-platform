@@ -7,6 +7,7 @@ import { SiteHeader } from "@/components/site-header";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { canManageApiKeys } from "@/domain/api-keys";
+import { canViewEmailPreviews } from "@/domain/email";
 import { ROLE_LABELS } from "@/domain/roles";
 import { canManageWebhooks } from "@/domain/webhooks";
 import { getCurrentUser, requireAuthContextOn } from "@/server/auth/session";
@@ -50,6 +51,11 @@ async function AuthenticatedShell({ children }: { children: React.ReactNode }) {
             {canManageApiKeys(context.role) && (
               <Button asChild variant="ghost">
                 <Link href="/dashboard/settings/api-keys">API keys</Link>
+              </Button>
+            )}
+            {canViewEmailPreviews(context.role) && (
+              <Button asChild variant="ghost">
+                <Link href="/dashboard/settings/email-previews">Emails</Link>
               </Button>
             )}
             {canManageWebhooks(context.role) && (

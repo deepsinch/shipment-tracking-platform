@@ -109,13 +109,18 @@ export async function readPosition(
 }
 
 /** Books a shipment from the list page and returns its tracking code (on its detail page). */
-export async function createShipment(page: Page): Promise<string> {
+export async function createShipment(
+  page: Page,
+  options: { recipientEmail?: string } = {},
+): Promise<string> {
   await page.getByRole("link", { name: "New shipment" }).click();
   await expect(page.getByRole("heading", { name: "New shipment", level: 1 })).toBeVisible();
 
   const recipient = page.getByRole("group", { name: "Recipient" });
   await recipient.getByLabel("Name", { exact: true }).fill("Grace Recipient");
   await recipient.getByLabel("Reference (optional)").fill("PO-1001");
+  if (options.recipientEmail)
+    await recipient.getByLabel("Email (optional)").fill(options.recipientEmail);
 
   const pickup = page.getByRole("group", { name: "Pickup" });
   await pickup.getByLabel("Pickup address").fill("Wilhelminakade 1");

@@ -11,6 +11,7 @@ import { ShipmentHistory } from "@/components/shipment-history";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SERVICE_LEVEL_LABELS } from "@/domain/service-level";
+import { canViewEmailStatus } from "@/domain/email";
 import { canAssignDrivers, canChangeDriver, statusOptionsFor } from "@/domain/shipment-permissions";
 import { isTerminalStatus } from "@/domain/shipment-status";
 import { RouteMap } from "@/components/map/route-map";
@@ -22,9 +23,11 @@ import type { Shipment } from "@/server/db/schema";
 import { routeBetween } from "@/server/routes/road-routes";
 import { getShipment } from "@/server/services/get-shipment";
 import { getShipmentPositions } from "@/server/services/get-shipment-positions";
+import { getShipmentEmailStatus } from "@/server/services/email-notifications";
 import { listDrivers } from "@/server/services/list-drivers";
 
 import { AssignDriverForm } from "./assign-driver-form";
+import { EmailNotifications } from "./email-notifications";
 import { LastSeen } from "./last-seen";
 import { StatusChangeForm } from "./status-change-form";
 
@@ -50,6 +53,9 @@ export default async function ShipmentPage({ params }: PageProps<"/dashboard/shi
   const driverList = canAssignDrivers(ctx.role) ? await listDrivers(ctx) : null;
   const drivers = driverList?.ok ? driverList.drivers : null;
   const lastPosition = await loadLastPosition(ctx, shipment);
+  const emailResult = canViewEmailStatus(ctx.role)
+    ? await getShipmentEmailStatus(ctx, shipment.id)
+    : null;
 
   return (
     <main className="flex flex-col gap-6">
@@ -134,6 +140,7 @@ export default async function ShipmentPage({ params }: PageProps<"/dashboard/shi
               )}
             </CardContent>
           </Card>
+          {emailResult?.ok && <EmailNotifications status={emailResult} />}
         </div>
         <ShipmentHistory events={events} className="lg:col-span-2" />
       </div>
