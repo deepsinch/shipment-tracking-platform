@@ -445,3 +445,26 @@ blocked `eval`. The signature pad imported a constant from a module that also im
 Zod 4 probes `new Function` when it loads. Rather than loosening the CSP, the client-side constants
 moved to a schema-free module, and "no Zod in client bundles" became a project rule. A CSP test that
 runs on every surface is what turned a silent risk into a red build.
+
+## An LLM feature that cannot book, leak or invent
+
+**Problem.** Dispatchers paste a customer's shipment request email and get a prefilled booking form.
+The email is untrusted input to a language model: a hostile email could try to make the feature act,
+exfiltrate data, or slip invented values into a booking.
+
+**Approach.** Structured output with no tools (a tool is an action surface), and a system prompt
+that treats the email as data placed between random per-request markers. The server then treats the
+model's answer as untrusted too: unknown keys are dropped, units and countries are normalized, every
+value must pass the same field rules as manual booking, and values that cannot be paraphrased
+(email, reference, postal code) must literally appear in the email or they are dropped as invented.
+The result is an editable draft; only a person can book it, through the normal path. Calls are capped
+per organization per day (and globally in the demo) with the existing Postgres counters, counted
+before the model call so failures cost quota too.
+
+**Honest limit.** This stops invented and invalid values, not values the attacker's own text
+supplies: if an injected email contains an address, a misled model could put it in the draft. Human
+review is the final control, and a test states that limit explicitly.
+
+**Evaluation.** Eight fixtures (English, German, French, one prompt injection, one with missing
+fields) run through the validation layer in CI with recorded answers; `pnpm intake:eval` measures
+field-level accuracy against the live model when a key is configured.
