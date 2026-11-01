@@ -93,12 +93,19 @@ export async function createWebhookEndpoint(
 ): Promise<CreateWebhookEndpointResult> {
   if (!canManageWebhooks(ctx.role)) return forbidden;
   const parsed = createWebhookEndpointSchema.safeParse(input);
-  if (!parsed.success) return validationFailure(parsed.error, { "eventTypes.": "eventTypes" });
-
-  // Fast feedback only; the real check runs again, with DNS, at every delivery.
-  const checked = checkWebhookUrl(parsed.data.url, urlPolicy());
-  if (!checked.ok) {
-    return { ok: false, reason: "validation", fieldErrors: { url: [checked.message] } };
+  // Fast feedback only; the real check runs again, with DNS, at every delivery. It runs even when
+  // another field is invalid, so one submit reports every problem.
+  const rawUrl = parsed.success ? parsed.data.url : (input as { url?: unknown } | null)?.url;
+  const checked = typeof rawUrl === "string" ? checkWebhookUrl(rawUrl, urlPolicy()) : null;
+  if (!parsed.success) {
+    const failure = validationFailure(parsed.error, { "eventTypes.": "eventTypes" });
+    if (checked && !checked.ok && !failure.fieldErrors.url) {
+      failure.fieldErrors.url = [checked.message];
+    }
+    return failure;
+  }
+  if (!checked?.ok) {
+    return { ok: false, reason: "validation", fieldErrors: { url: [checked!.message] } };
   }
 
   const db = getDb();

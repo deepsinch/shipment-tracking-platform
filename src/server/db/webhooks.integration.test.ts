@@ -82,7 +82,9 @@ describe("webhook tables", () => {
       const { rows } = await getDb().$client.query<{ indexdef: string }>(
         `SELECT indexdef FROM pg_indexes WHERE indexname = 'webhook_deliveries_due_idx'`,
       );
-      expect(rows[0]!.indexdef).toMatch(/\(next_attempt_at, id\)[\s\S]*WHERE[\s\S]*pending[\s\S]*failed/);
+      expect(rows[0]!.indexdef).toMatch(
+        /\(next_attempt_at, id\)[\s\S]*WHERE[\s\S]*pending[\s\S]*failed/,
+      );
     });
   });
 

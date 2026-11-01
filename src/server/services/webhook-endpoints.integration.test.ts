@@ -92,6 +92,18 @@ describe("webhook endpoints", () => {
       ).toMatch(message);
     });
 
+    it("reports a bad URL and a missing event together, in one submit", async () => {
+      const result = await createWebhookEndpoint(admin, {
+        url: "http://example.com/",
+        eventTypes: [],
+      });
+      expect(result).toMatchObject({
+        ok: false,
+        reason: "validation",
+        fieldErrors: { url: [expect.stringMatching(/https/)], eventTypes: [expect.any(String)] },
+      });
+    });
+
     it("accepts a single event sent as a string (a one-box checkbox group)", async () => {
       const { endpoint } = await create(admin, { url: URL_OK, eventTypes: "shipment.created" });
       expect(endpoint.eventTypes).toEqual(["shipment.created"]);
