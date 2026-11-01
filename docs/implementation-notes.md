@@ -573,9 +573,9 @@ import.meta.url).href)` makes Turbopack emit the worker to `/_next/static/media/
 - **Gotcha: Node's `fetch` ignores `HTTPS_PROXY`.** In this environment run
   `NODE_USE_ENV_PROXY=1 pnpm routes:fetch` (Node 22.21+, prints an "experimental" warning). curl
   works without it. The OSRM demo server answered every request.
-- **Gotcha: `changeShipmentStatus` checks `occurredAt` against the real clock** (no injectable
-  `now`), so a test clock must stay at most 5 minutes ahead of real time, and after the shipment's
-  last status event. The simulator test's clock starts an hour in the past and steps 12 s.
+- **Injectable clocks.** `changeShipmentStatus` and `assignDriver` take `deps.now` like `createShipment`
+  and `recordLocationPing`; the simulator passes its clock to all of them, so its test clock needs no
+  real-time offset.
 - **Throttle in the simulator.** The tick is 12 s and `recordLocationPing` gets the simulator's
   clock as server time; a throttled ping is logged and the truck keeps its new distance, so the
   next accepted ping reports where it really is (integration test with 4 s steps).
@@ -600,10 +600,6 @@ import.meta.url).href)` makes Turbopack emit the worker to `/_next/static/media/
 - **Resolved: "the demo runs out of trucks".** The simulator books replacements when fewer than 6
   drivable shipments remain (max 2 per tick). Design and decision 46 in the architecture doc; code
   in `src/server/simulator/booking.ts` (pure, `booking.test.ts`) and `refill()` in `simulator.ts`.
-- **Gotcha: `assignDriver` has no injectable clock**, so in tests the `driver_assigned` event is
-  stamped with the real time while the test clock runs an hour in the past. History order by
-  `occurredAt` therefore puts it last; tests look events up by type. Harmless for status changes,
-  which only compare with the latest _status_ event.
 - **Gotcha: `TickReport` has a new required `booked` field**; tests that stub `tick()` must return
   it (`booked: []`).
 - **Gotcha: the refill counts drivable shipments, not the whole organization's.** Unassigned or
@@ -830,9 +826,6 @@ import.meta.url).href)` makes Turbopack emit the worker to `/_next/static/media/
   failure the user is deleted again (compensation), but a crash between the two would leave an
   org-less user, who can sign in but gets redirected away from `/dashboard`.
 - Only one organization per user is supported in the UI (no org switcher).
-- **Rate-limit rows are never purged.** Expired windows are overwritten on the next attempt for
-  the same key, but keys that never come back stay. Add a periodic
-  `DELETE FROM auth_rate_limits WHERE window_start < now() - interval '1 day'` (cron) when deployed.
 - **The client IP trusts `x-forwarded-for`.** Correct behind Vercel or another proxy that sets it;
   a self-hosted deployment without such a proxy lets clients choose their IP for the per-IP limits
   (the per-account sign-in limit still holds per IP chosen). Documented in `client-ip.ts`.
