@@ -868,10 +868,48 @@ LOCKED` and a lease, send with no transaction open, attempts-guarded outcome wri
 - A dispatcher pastes a shipment request email. The model returns structured output, which is
   validated by the same Zod schema as `createShipment` and shown as an editable draft. Nothing is
   ever booked automatically.
-- A small, cheap Claude model (see the `claude-api` reference for the current id), with a per-org
+- A small, cheap Claude model (`claude-haiku-5-5` by default), with a per-org
   daily cap and a tight global cap in demo mode. Evaluation uses committed fixtures with recorded
   responses, so CI makes no live calls.
 - An inbound-email webhook can be added later, once the owner has a mail domain.
+
+#### As built (checkpoint 5)
+
+- **Flow.** The new-shipment page shows "Paste a request email" only when intake is configured
+  (`env.intake.enabled`: an `ANTHROPIC_API_KEY`, or the test-only fake). A Server Action calls
+  `extractShipmentDraft` (admins and dispatchers), which returns values for the form; the form
+  remounts with them as defaults and an "AI draft: check every field" note listing what was not
+  found or could not be used. The dispatcher edits and submits through `createShipment` like any
+  booking. Nothing in intake can create, change or delete a shipment (tested).
+- **Model.** `IntakeModel` (`extract({ emailText, today })` returns raw JSON). The Anthropic adapter
+  uses `@anthropic-ai/sdk` with structured outputs (`output_config.format`, a JSON schema derived from
+  the intake field list with `z.toJSONSchema`), `claude-haiku-5-5` by default (`INTAKE_MODEL`
+  overrides), `max_tokens` 1500, effort `low`, no tools. The fake replays recorded answers keyed by
+  email text and throws for an unknown email. The fake wins over a key, and `INTAKE_USE_FAKE_MODEL`
+  is refused on Vercel and in demo mode, so CI and the e2e server cannot reach the live API.
+- **Untrusted email.** The system prompt says the email is data, to extract only and never act or
+  follow instructions; the email goes in the user message between random per-request markers;
+  there are no tools, so an injected instruction has nothing to call; output is a schema with only
+  form fields. Then `buildDraft` treats the answer as untrusted too: unknown keys are dropped,
+  values are normalized (country names and codes to ISO-2, tonnes, grams and pounds to kg, offsets
+  to UTC `datetime-local`), email, reference and postal codes must literally appear in the email
+  or are dropped as invented, and each value must pass the same field rule `createShipmentSchema`
+  applies at booking (`createShipmentSchema.shape[field]`), else it is dropped, not repaired.
+  Missing stays blank. Input is capped at 20 KB (bytes) and never logged; adapter errors are
+  reduced to class and status.
+- **Cost control.** Postgres fixed-window counters (decision 11): 50 per organization per 24 h
+  window, or in demo mode 200 for everyone; counted before the call (failed calls count);
+  a rejected paste does not count; the cap-hit message names the wait.
+- **Evaluation.** Eight invented fixture emails (English, German, French; a prompt injection; one
+  missing key fields; tonnes, grams, pounds, country names, offsets) with recorded model answers and
+  the expected form values (`src/server/intake/fixtures.ts`). Unit tests run the pipeline over the
+  recordings; `pnpm intake:eval` runs the emails through the live model and prints per-field accuracy.
+- **CSP.** No change: the call is server to server. The browser only talks to the app.
+- **Known limits.** Grounding stops invented values, not values the email supplies: an address that
+  appears in injected text can still be drafted into a field a person must review (tested as a known
+  limit). The live model has not been run from CI or the build environment. No inbound-email
+  webhook, no attachments (PDF or image orders), no batch of several shipments from one email, and
+  no memory of past corrections.
 
 ## Decisions log
 
@@ -949,3 +987,8 @@ LOCKED` and a lease, send with no transaction open, attempts-guarded outcome wri
 | 70  | `delivery_proofs` is append-only with no retention job yet                                                                                    | A proof is evidence, so nobody may edit or delete it, in code or in SQL. Retention and erasure depend on the owner's legal basis; when decided it needs a deliberate migration (for example a function that purges a closed organization), not an exception now                                                                                                                             | Allow DELETE for a purge job today (an undefended hole for no current need); keep proofs editable                                                                                                                                                                                                     |
 | 71  | Webhooks and the public page carry the name and booleans only; the public page is key-set tested                                              | The recipient's name is already on the shipment; the signature and the photo are personal data with no reason to leave the application. Receivers can ask the dashboard if they need more                                                                                                                                                                                                   | Include the signature as a data URL (large, sensitive); a signed link to the photo in the webhook                                                                                                                                                                                                     |
 | 72  | EXIF stripping by walking JPEG segments and PNG chunks on the server, plus a canvas re-encode in the browser                                  | About 60 lines and no dependency; the server does not trust the browser. Only JPEG and PNG are accepted (the browser turns HEIC and WebP into JPEG)                                                                                                                                                                                                                                         | `sharp` (native binary, heavy for a serverless bundle); client-side only (not a boundary)                                                                                                                                                                                                             |
+| 73  | The model returns structured output (JSON schema) with no tools, and everything it says is validated again on the server                      | An injected instruction has no tool to call and no channel except form fields; the schema, the grounding check and the booking rules decide what survives. A person books                                                                                                                                                                                                                   | Tool use with a forced tool (not accepted by every current model, and a tool is an action surface); free text parsed with regexes                                                                                                                                                                     |
+| 74  | The draft is validated with the booking schema's own field rules and dropped, not repaired, when invalid                                      | One definition of "valid shipment"; a blank is an obvious prompt, a repaired guess is a quiet error                                                                                                                                                                                                                                                                                         | A second, looser schema for drafts; letting the model retry until valid                                                                                                                                                                                                                               |
+| 75  | Email, reference and postal codes must appear in the email text                                                                               | The cheapest check that catches a made-up address or number, which cannot be paraphrased. It does not catch values the email itself supplies (known limit)                                                                                                                                                                                                                                  | Trusting the model; asking a second model to check                                                                                                                                                                                                                                                    |
+| 76  | Caps per organization (50/day) and for the whole demo (200/day) on the Postgres counters, counted before the call                             | The bill follows attempts; one mechanism already exists (decision 11); the Anthropic console's spending limit is the backstop                                                                                                                                                                                                                                                               | A per-user cap; counting only successes; a separate usage table                                                                                                                                                                                                                                       |
+| 77  | Evaluation is fixtures with recorded answers in CI and a manual live script                                                                   | CI stays free and deterministic; the live script answers "is the model still good at this" when someone changes the prompt or model                                                                                                                                                                                                                                                         | Live calls in CI; no evaluation                                                                                                                                                                                                                                                                       |

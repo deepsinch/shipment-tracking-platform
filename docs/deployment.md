@@ -236,6 +236,40 @@ Not verified against the real service from the build environment (vercel.com is 
 the adapter follows `@vercel/blob` 2.8's `put`, `get` and `del` with `access: "private"`. Check one
 real delivery with a photo after enabling it.
 
+## Turning on AI intake (optional)
+
+"Paste a request email" on the new-shipment page needs an **Anthropic API key**. Without one the
+panel is not shown anywhere; nothing else changes.
+
+1. In the [Anthropic Console](https://console.anthropic.com) create an API key (a dedicated one for
+   this project), and **set a spending limit** for the workspace or organization there. The app's
+   own caps (below) bound the number of requests, but the limit in the console is the one that
+   bounds the bill.
+2. In Vercel add `ANTHROPIC_API_KEY` (Production, and Preview if you want it there; mark it
+   "Sensitive"). Optionally `INTAKE_MODEL` to use another model id than the default,
+   `claude-haiku-5-5`.
+3. Redeploy. The panel appears for admins and dispatchers.
+
+What it costs and how it is limited: each paste is one request to the model, with a hard cap of
+1,500 output tokens and an input cap of 20 KB. The app counts requests in Postgres: **50 per company
+per day**, and in demo mode **200 per day for the whole demo** (strangers share one company and one
+bill). A request is counted when it is made, whether it succeeds or not. When the cap is used up the
+panel says so and the form still works by hand. The window is 24 hours from the first request, not
+a calendar day. A short email costs a fraction of a cent on a small model; check the current price
+on Anthropic's pricing page and your own usage in the console.
+
+Privacy: the pasted text is sent to Anthropic's API and is not stored by Waybill (it is not logged
+and not kept in the database). It is untrusted input: the model has no tools and can only return
+the fields of the form, which are checked again on the server and then by the person who books.
+
+Evaluating the prompt or the model (never part of CI, it calls the live API): with the key in `.env`,
+`pnpm intake:eval` sends the committed example emails and prints how many form fields come back
+exactly right, per field. Run it after changing the prompt, the schema or `INTAKE_MODEL`.
+
+Not verified against the live API from the build environment: the adapter follows
+`@anthropic-ai/sdk` 1.3 (`messages.create` with `output_config.format`). After enabling it, run
+`pnpm intake:eval` once and paste a real email.
+
 ## Turning demo mode off
 
 Demo mode is a deployment setting. To switch it off:

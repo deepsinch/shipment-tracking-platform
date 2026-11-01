@@ -99,9 +99,20 @@ Each checkpoint green and reviewed, like Phase 2. Suggested order (later ones bu
    `delivered` event in one transaction (`delivery_proofs`, migration 0010, append-only). Replaces the
    confirm step for drivers' deliveries; staff can still mark a delivery from the office (confirm
    dialog, recorded as no proof). The public page, webhook and email say who signed, nothing more.
-5. **AI intake of shipment request emails.** Inbound email (webhook from the mail provider) parsed
-   by an LLM into a draft shipment (structured output validated by the same Zod schema), shown to a
-   dispatcher for review before `createShipment`; never auto-booked. Evaluate on a small fixture set.
+5. **[done] AI intake of shipment request emails.** "Paste a request email" on the new-shipment page
+   (admins and dispatchers, only with `ANTHROPIC_API_KEY`): the model's structured answer is checked
+   field by field against `createShipmentSchema`'s rules and prefills the normal form as a draft; a
+   person books it. Daily caps on the Postgres counters, eight fixtures, `pnpm intake:eval` for the
+   live model.
+
+**Phase 3 is complete** (public API, webhooks, email, proof of delivery, AI intake). Known gaps
+across the phase, none blocking: no retention or erasure for delivery proofs and photos (decision 70);
+no retention job for old webhook deliveries and email messages; webhook retries and emails wait for
+activity or the daily cron on a quiet Hobby deployment; the delivery log and the email status on
+the shipment page do not update live; the Resend, Vercel Blob and Anthropic adapters have only been
+exercised against local fakes and mocked SDKs (the owner should send one real email, deliver once
+with a photo and run `pnpm intake:eval` after adding each key); intake has no inbound-email
+webhook, no attachments and no batch of several shipments.
 
 ## Roadmap
 
@@ -917,6 +928,41 @@ enabling Blob in `docs/deployment.md`.
   driver app does not show the proof after delivering, the sheet's photo and signature are lost if
   the sheet is closed.
 - **Mobile navigation:** unchanged. Sheet, staff card and public page checked at 390 and 1280 px.
+
+### AI intake (Phase 3, checkpoint 5)
+
+Design in `docs/architecture.md` ("AI intake", "As built (checkpoint 5)"), decisions 73 to 77; enabling it
+in `docs/deployment.md`.
+
+- **Where things are.** Pure: `src/domain/intake.ts` (fields, limits, country, weight and date
+  normalizers, grounding check; no Zod, so the browser may import it). Server: `src/server/intake/`
+  (`model.ts` interface and fake, `anthropic-model.ts`, `prompt.ts`, `schema.ts`, `draft.ts`
+  `buildDraft`, `fixtures.ts`, `index.ts` `getIntakeModel`), `services/intake.ts`
+  `extractShipmentDraft`. UI: `dashboard/shipments/new/` (`intake-action.ts`, `intake-panel.tsx`,
+  `draft-note.tsx`, `new-shipment-workspace.tsx`; the form takes a `draft` prop and remounts, keyed
+  by the draft's id). `scripts/intake-eval.ts`.
+- **Env:** `ANTHROPIC_API_KEY`, `INTAKE_MODEL`, `INTAKE_USE_FAKE_MODEL` (group `intake`). The fake is
+  refused on Vercel and in demo mode and wins over a key. The e2e main server sets it
+  (`playwright.config.ts`); the demo server has no key, so its spec checks the panel is absent.
+- **SDK facts checked in the installed package** (`@anthropic-ai/sdk` 1.3): `messages.create` takes
+  `output_config: { effort, format: { type: "json_schema", schema } }`; no tools are sent, which
+  also sidesteps forced `tool_choice`, which several current models reject. `z.toJSONSchema` makes
+  the schema (delete `$schema`, `additionalProperties: false`). Not run against the live API here.
+- **Tests that matter:** the fixtures run through the fake and `buildDraft` (unit); grounding,
+  invalid-value, unknown-key and compromised-answer tests; adapter test with the SDK mocked (request
+  shape, no tools, email only in the user message, errors never log the email); service integration
+  tests (hidden without a key, forbidden for drivers, no shipment ever created, 20 KB cap in bytes,
+  50 per day then a refusal, the demo's global cap, a failed call still counts); e2e with the fake.
+- **Proven red:** removing the cap check (2 service tests red), and removing both the booking-rule
+  validation and the grounding check in `buildDraft` (6 red).
+- **Gotcha: client code must not import Zod.** `src/domain/intake.ts` stays schema-free for that
+  reason (see the proof-of-delivery CSP note); the Zod schemas are under `src/server/intake/`.
+- **Gotcha: the intake panel's `defaultValue` echo.** React resets uncontrolled fields after an
+  action, so the pasted text is echoed back through state, like every other form here.
+- **Known limits:** see architecture "Known limits". Notably an address present in the email's
+  injected text can still be drafted (a person reviews every field).
+- **Mobile navigation:** unchanged. The panel and the prefilled draft were checked at 390 and
+  1280 px (no horizontal scroll).
 
 ### Testing
 

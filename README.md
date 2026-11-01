@@ -57,8 +57,21 @@ nightly reset) is code in this repository, described in [docs/deployment.md](doc
   protection as the forms, RFC 9457 errors, per-key rate limits and an OpenAPI 3.1 document. See
   [docs/api.md](docs/api.md).
 
-Next up (Phase 3): webhooks, email notifications, proof of delivery and AI intake of shipment
-requests (see the roadmap in [docs/implementation-notes.md](docs/implementation-notes.md)).
+- **Webhooks:** signed, retried deliveries of shipment events to an endpoint an admin registers,
+  with a delivery log and resend, and a guard against calling private addresses.
+- **Customer emails:** status updates through Resend when configured (a stored preview otherwise),
+  with a one-click unsubscribe per company and address.
+- **Proof of delivery:** the driver app collects the recipient's printed name, an optional drawn
+  signature and an optional photo (private storage, shown to staff only); the public page says who
+  signed, nothing more.
+- **AI intake:** with an Anthropic API key, "Paste a request email" on the new-shipment page fills
+  the form as a draft from an email (in English or other European languages). A person reviews
+  every field and books it; nothing is created automatically. Daily caps keep the cost bounded,
+  and without a key the feature is simply not shown. `pnpm intake:eval` scores the model on the
+  committed fixtures (see [docs/deployment.md](docs/deployment.md)).
+
+Every integration works without its key: it degrades visibly instead of failing, and the tests
+never call a third-party service.
 
 ## Stack
 
