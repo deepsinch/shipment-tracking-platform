@@ -75,6 +75,9 @@ src/
 - Outbound integrations (webhooks, later email) are enqueued in the outbox inside the change's own
   transaction and delivered outside any transaction. Every outbound HTTP request to a user-supplied
   URL goes through the webhook destination guard (resolve, vet every address, pin the connection).
+- Client bundles must not import Zod: Zod 4 probes `new Function` at load, which the CSP reports as a
+  violation. Shared constants and types for client components live in schema-free modules
+  (e.g. `src/domain/signature.ts`); schemas stay server-side.
 - Importing a module must not require environment variables (e.g. the DB pool is created lazily), so
   `next build` works without a database.
 

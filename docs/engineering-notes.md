@@ -425,3 +425,23 @@ whose button posts, so mail scanners that follow links cannot unsubscribe anyone
 **Without a key, and in the demo.** Without Resend credentials, and always in demo mode, messages go
 to a stored preview that admins can read, so the whole flow is demonstrable without sending real
 email to addresses visitors typed.
+
+## Proof of delivery, and a CSP test that caught a bundling bug
+
+**Problem.** Drivers capture a printed name, a drawn signature and an optional photo on delivery.
+Proof must be atomic with the "delivered" event, photos must be private and free of location data,
+and a public demo must never store visitor files.
+
+**Approach.** The proof row is written in the same transaction as the status change (an append-only
+table, like history); the photo uploads first and is deleted again if the transaction does not
+commit. Signatures are compact vector strokes, rendered as SVG in React. Photos are accepted as JPEG
+or PNG by magic bytes, stripped of EXIF/XMP server-side by walking file segments (no dependency), and
+streamed to staff through an authenticated route, so the storage key never reaches a browser and the
+CSP needs no new origin. The printed name is the proof, so keyboard users can complete a delivery
+without drawing. The public page and webhooks only learn "signed by <name>".
+
+**Bug story.** After the first UI commit the CSP end-to-end test failed on the driver pages with a
+blocked `eval`. The signature pad imported a constant from a module that also imported Zod, and
+Zod 4 probes `new Function` when it loads. Rather than loosening the CSP, the client-side constants
+moved to a schema-free module, and "no Zod in client bundles" became a project rule. A CSP test that
+runs on every surface is what turned a silent risk into a red build.
