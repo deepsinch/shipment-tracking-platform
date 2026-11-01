@@ -766,7 +766,7 @@ import.meta.url).href)` makes Turbopack emit the worker to `/_next/static/media/
   the linked pages. Facts the code depends on were confirmed that way: `VERCEL_*` hosts have no
   scheme; `CRON_SECRET` arrives as `Authorization: Bearer …`; Neon's `DATABASE_URL` is pooled,
   `DATABASE_URL_UNPOOLED` direct; previews get branch `preview/<git-branch>`.
-- **Still the owner's job:** the dashboard steps, then replace "link coming soon" in the README.
+- **Still the owner's job:** the dashboard steps (the README already links the live demo).
 
 ### Testing
 
@@ -781,6 +781,43 @@ import.meta.url).href)` makes Turbopack emit the worker to `/_next/static/media/
   the `AuthContext` a service receives for them.
 - Tests never clean up: fixtures use random ids, so tests are isolated without deleting rows
   (history rows cannot be deleted anyway).
+
+### Demo location privacy (found on the live demo)
+
+- **The bug.** On the hosted demo anyone can sign in as the demo driver and tap "Share my
+  location"; the browser's real position was stored through `recordLocationPing` and shown to every
+  other visitor on the live map (a ping from India appeared on a Paris-bound truck). It also fought
+  the simulator's positions. Branch `fix-demo-location-privacy`; decision 47 and "Demo mode" in the
+  architecture doc.
+- **The fix.** The Server Action calls `recordDriverLocation` (new, `src/server/services`). Outside
+  demo mode it is `recordLocationPing`, unchanged. In demo mode it reads only the shipment id,
+  derives the next point along the road route from the last stored position
+  (`nextSimulatedPosition` + `simulatedStepMeters` in `src/server/simulator/simulated-position.ts`,
+  pure, same pace as the simulator) and calls `recordLocationPing` with it. The client side is a
+  `createSimulatedPositionSource` (`src/lib/location-sharer.ts`) that only supplies the beat: no
+  `navigator.geolocation` access at all, placeholder coordinates that the demo sender drops.
+- **Gotcha: do not put the guard inside `recordLocationPing`.** The simulator calls it as the demo
+  driver, in demo mode, with positions it computed; a guard there would overwrite them. New code
+  that takes a position from a client must go through `recordDriverLocation` (or ignore client
+  coordinates itself in demo mode).
+- **Gotcha: `LocationPingInput` is `{ shipmentId } & Partial<Fix>`.** The fix is required outside
+  demo mode (a bare id is a validation failure there) and ignored inside it.
+- **Gotcha: a demo shipment without stop coordinates has no route.** `recordDriverLocation` answers
+  `no_route`; the action maps it to a stop with a message. Seeded and simulator-booked shipments
+  always have coordinates; UI-booked ones do not (no geocoding).
+- **Demo pace.** A visitor's pings move the truck by the simulator's step (about 8 km on the road)
+  each, from its last stored position, so a truck that is both ticked and "shared" advances faster
+  than one that is only ticked. Both always continue from the stored position, so nothing jumps
+  back. The throttle (10 s) still applies, shared with the simulator's pings.
+- **Tests.** Unit: `simulated-position.test.ts`, `location-sharer.test.ts` (the simulated source).
+  Integration: `record-driver-location.integration.test.ts` (crafted coordinates in demo mode are
+  stored as the route position; supplied coordinates stored outside it; scope, throttle, no route;
+  demo mode read from `DEMO_MODE`). Proven red: with the demo branch bypassed 7 of the 10 fail;
+  with the component touching `navigator.geolocation` in demo mode the demo e2e fails. E2E (demo
+  project): the driver switches on sharing, `navigator.geolocation` is stubbed to record any touch
+  (even reading the property) and to throw, and the stored position is the simulated one, not the
+  browser's (set to Delhi). Visual check at 390 and 1280 px: the note sits under the description and
+  reads fine on one phone screen.
 
 ## Known issues / TODOs
 

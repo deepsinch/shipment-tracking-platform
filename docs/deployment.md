@@ -42,6 +42,9 @@ Tick these off as you go. Each item is explained in the numbered steps below.
   demo trucks one step every ~12 seconds. Nothing runs when nobody is looking. When fewer than 6
   shipments are left to drive, the same tick books up to 2 new ones as the demo dispatcher, so the
   map keeps trucks on it all day; the nightly reset clears them with the rest.
+- Visitors can switch on "Share my location" as the demo driver, but their real location is never
+  asked for or used: the page does not call the browser's geolocation (no permission prompt), and
+  the server stores a simulated position along the shipment's route instead.
 
 ## 1. Create the accounts
 
@@ -149,6 +152,10 @@ Work through this list on the live URL (the project's **Domains** list shows the
       on the shipment list; **Sign in as driver** lands on the phone-style driver app.
 - [ ] Signed in as dispatcher, open **Live map**. Within about 15 seconds the trucks start moving
       (and the **Live** pill in the header is green). Open a shipment: its route map follows too.
+- [ ] Signed in as driver, open a shipment that is on the road and switch on **Share my location**.
+      The browser must show no permission prompt; the card reads "Demo: a simulated position along
+      the route is shared. Your real location is never used.", and the dispatcher's live map shows
+      that truck on its route.
 - [ ] Open `https://<your-url>/api/cron/reset-demo` in a browser tab. It must show a blank page
       or "401": the reset endpoint refuses anyone without the secret.
 - [ ] **Settings → Cron Jobs** in the project lists `/api/cron/reset-demo` with schedule
@@ -159,7 +166,8 @@ Work through this list on the live URL (the project's **Domains** list shows the
 - [ ] Open a pull request: its preview comment shows a URL, and the preview works the same way
       with its own database branch.
 
-Then replace the placeholder in the README ("Live demo") with your production URL.
+The README's "Live demo" link already points at the production URL; change it if the URL changes
+(a custom domain, say).
 
 ## Custom domain (optional)
 
