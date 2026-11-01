@@ -1,6 +1,6 @@
-import Link from "next/link";
 import { Suspense } from "react";
 
+import { DashboardNav, type NavItem } from "@/components/dashboard-nav";
 import { LiveIndicator } from "@/components/realtime/live-indicator";
 import { RealtimeProvider } from "@/components/realtime/realtime-provider";
 import { SiteHeader } from "@/components/site-header";
@@ -36,34 +36,26 @@ async function AuthenticatedShell({ children }: { children: React.ReactNode }) {
   // Staff opening the dashboard doubles as the heartbeat that retries due webhooks (throttled).
   drainOutboxOnActivity();
 
+  const navItems: NavItem[] = [
+    { href: "/dashboard/shipments", label: "Shipments" },
+    { href: "/dashboard/map", label: "Live map" },
+    ...(canManageApiKeys(context.role)
+      ? [{ href: "/dashboard/settings/api-keys", label: "API keys" }]
+      : []),
+    ...(canViewEmailPreviews(context.role)
+      ? [{ href: "/dashboard/settings/email-previews", label: "Emails" }]
+      : []),
+    ...(canManageWebhooks(context.role)
+      ? [{ href: "/dashboard/settings/webhooks", label: "Webhooks" }]
+      : []),
+  ];
+
   return (
     <RealtimeProvider>
       <div className="flex flex-1 flex-col bg-muted/40">
         <SiteHeader>
           <LiveIndicator />
-          <nav aria-label="Dashboard" className="hidden sm:block">
-            <Button asChild variant="ghost">
-              <Link href="/dashboard/shipments">Shipments</Link>
-            </Button>
-            <Button asChild variant="ghost">
-              <Link href="/dashboard/map">Live map</Link>
-            </Button>
-            {canManageApiKeys(context.role) && (
-              <Button asChild variant="ghost">
-                <Link href="/dashboard/settings/api-keys">API keys</Link>
-              </Button>
-            )}
-            {canViewEmailPreviews(context.role) && (
-              <Button asChild variant="ghost">
-                <Link href="/dashboard/settings/email-previews">Emails</Link>
-              </Button>
-            )}
-            {canManageWebhooks(context.role) && (
-              <Button asChild variant="ghost">
-                <Link href="/dashboard/settings/webhooks">Webhooks</Link>
-              </Button>
-            )}
-          </nav>
+          <DashboardNav items={navItems} />
           <span className="hidden text-muted-foreground md:inline">
             {user?.name} · {ROLE_LABELS[context.role]}
           </span>
