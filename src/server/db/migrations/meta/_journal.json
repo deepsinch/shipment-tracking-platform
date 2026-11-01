@@ -71,6 +71,13 @@
       "when": 1793557299768,
       "tag": "0009_email",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1793559335898,
+      "tag": "0010_delivery_proofs",
+      "breakpoints": true
     }
   ]
 }

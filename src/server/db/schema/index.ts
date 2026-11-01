@@ -5,3 +5,4 @@ export * from "./demo";
 export * from "./api-keys";
 export * from "./webhooks";
 export * from "./email";
+export * from "./delivery-proofs";
