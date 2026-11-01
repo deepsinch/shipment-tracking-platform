@@ -39,7 +39,7 @@ Checkpoints:
    demo sign-in, `/api/cron/reset-demo`, globally throttled `/api/demo/tick`, and a click-by-click
    deployment guide for the owner (`docs/deployment.md`).
 
-After Phase 4a: **Phase 3** (checkpoints below, under "Next: Phase 3"), then the rest of Phase 4. Phase 2 delivered, checkpoint
+**Now: Phase 3** on branch `phase-3-integrations` (checkpoints under "Next: Phase 3"; design in `docs/architecture.md`, "Phase 3: integrations"), then the rest of Phase 4. Phase 2 delivered, checkpoint
 by checkpoint (design and as-built notes in `docs/architecture.md`, "Phase 2: live tracking"):
 
 1. **[done] Driver app and reassignment.** `/driver` (mobile-first, assigned shipments, big-button status

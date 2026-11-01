@@ -657,6 +657,72 @@ architect's design; the implementation refines it.
   indexable. As built, `/api` and the auth pages are disallowed too, and everything else (the
   landing page and its `/_next/` assets) stays allowed.
 
+## Phase 3: integrations (design)
+
+The checkpoint plan is in `docs/implementation-notes.md` ("Next: Phase 3"). This section records the
+architect's decisions that the plan leaves open.
+
+### Every integration works without its key
+
+Resend, Vercel Blob and the Anthropic API need accounts the owner adds later. Each integration sits
+behind a small adapter interface with a real implementation and a fake one. Without its key a
+feature degrades visibly instead of failing: email goes to a stored preview, photo capture is
+hidden, AI intake is hidden. Tests always use the fakes, so CI never calls a third-party service.
+Adding the key in Vercel turns a feature on with no code change.
+
+### Public API
+
+- API keys are random 32-byte secrets shown once. Only a SHA-256 hash and a display prefix are
+  stored. Keys belong to an organization, carry scopes, and authenticate as an `AuthContext` with a
+  dedicated `api` role whose permissions equal a dispatcher's, so every service rule applies.
+- Responses are explicit projections with key-set tests. Errors use RFC 9457 problem details.
+- Concurrency over HTTP: `ETag` is the shipment version. Status changes require `If-Match`
+  (`428` without it, `412` on a mismatch).
+- Per-key rate limits reuse the Postgres fixed-window counters (decision 11).
+
+### Webhooks without a long-running worker
+
+- Changes write an outbox row in the same transaction (like `pg_notify`), so a delivery exists only
+  if the change committed.
+- **Where the worker runs (Hobby has only daily cron):** the first attempt runs right after the
+  response via Next's `after()`. Retries run in a drain that is globally throttled (the conditional
+  upsert pattern) and triggered by later app and API activity. A daily cron is the backstop, and the
+  delivery log has a "Resend" button. The backoff schedule is 1 min, 5 min, 30 min, 2 h, 6 h, then
+  dead-letter. At scale this becomes a queue (Vercel Queues or QStash) behind the same outbox.
+- Signatures are HMAC-SHA256 over `timestamp.body` in a `Waybill-Signature` header, with a 5-minute
+  replay window. Each endpoint has its own secret, shown once.
+- **SSRF protection:** endpoint URLs must be `https`. The resolved IP addresses must not be private,
+  loopback, link-local or metadata addresses, and this is checked at delivery time, not only on save,
+  to defeat DNS rebinding. Redirects are not followed, the timeout is 5 seconds and response bodies
+  are capped.
+- Deliveries are at least once, and every payload carries an event id for receivers to deduplicate.
+
+### Email
+
+- Customer notifications on chosen status changes are sent from the same outbox, with an
+  idempotency key per event, the public tracking link and an unsubscribe link.
+- In demo mode, email never leaves the system: recipients are whatever visitors type, so sending
+  would be an abuse vector. Messages go to the stored preview, which is shown in the UI.
+
+### Proof of delivery
+
+- The signature is captured as vector strokes (small JSON) and stored in the database, so it needs no
+  storage account. The photo goes to private object storage (Vercel Blob), with short-lived signed
+  URLs for staff only.
+- In demo mode, photo upload is disabled (no visitor files are stored) and a sample photo is shown.
+  Signatures still work.
+- The public page shows "Delivered, signed by <name>" and never the photo or the signature.
+
+### AI intake
+
+- A dispatcher pastes a shipment request email. The model returns structured output, which is
+  validated by the same Zod schema as `createShipment` and shown as an editable draft. Nothing is
+  ever booked automatically.
+- A small, cheap Claude model (see the `claude-api` reference for the current id), with a per-org
+  daily cap and a tight global cap in demo mode. Evaluation uses committed fixtures with recorded
+  responses, so CI makes no live calls.
+- An inbound-email webhook can be added later, once the owner has a mail domain.
+
 ## Decisions log
 
 | #   | Decision                                                                                                                                      | Why                                                                                                                                                                                                                                                     | Alternatives considered                                                                                                                                                                                                                                                                               |
@@ -709,3 +775,7 @@ architect's design; the implementation refines it.
 | 46  | The simulator books its own replacement shipments (pure `planRefill`, through `createShipment` and `assignDriver`)                            | A hosted demo that empties after a few minutes of viewing looks broken, and viewing time adds up across visitors; booking through the services keeps history, versions and realtime honest                                                              | Slower time compression (only delays the end); resetting the demo when empty (signs everyone out); inserting rows directly (bypasses every rule the demo is meant to show)                                                                                                                            |
 | 47  | Demo mode never uses a visitor's real position: the server derives a simulated one along the route (`recordDriverLocation`)                   | A public demo lets anyone share a real location that every other visitor sees on the map; ignoring client coordinates on the server (not only skipping the browser API) means a crafted request cannot leak one either, and the flow stays demonstrable | Disabling sharing in the demo (visitors cannot try the flow); trusting the client to send nothing (a crafted request still works); a flag inside `recordLocationPing` (would break the simulator, which supplies its own positions); blurring or rounding real positions (still a visitor's location) |
 | 48  | A daily cron (`/api/cron/purge`, `purgeExpiredData`) deletes pings received over 30 days ago and rate-limit rows over a day past their window | Telemetry and counters are only useful for a while and would otherwise grow without bound; one transaction, same `CRON_SECRET` check as the demo reset, works with demo mode off; `shipment_events` and `shipment_positions` are never touched          | Purge on write (slows the hot path); a database-side scheduler such as pg_cron (not available on every host); keeping everything (unbounded growth)                                                                                                                                                   |
+| 49  | Integrations behind adapters with fakes; features degrade without keys                                                                        | The app ships before the owner adds Resend, Blob or Anthropic keys; CI never calls third parties                                                                                                                                                        | Hard dependency on keys; mocking at the HTTP layer                                                                                                                                                                                                                                                    |
+| 50  | Webhook outbox with an after() first attempt and throttled activity-driven retries                                                            | Delivery exists only if the change committed; works on Hobby without a worker or per-minute cron                                                                                                                                                        | A worker process; per-minute cron (paid); a hosted queue now (kept as the scale path)                                                                                                                                                                                                                 |
+| 51  | Webhook SSRF guard at delivery time                                                                                                           | Blocks private, loopback, link-local and metadata IPs even after DNS rebinding                                                                                                                                                                          | Validating the URL only when it is saved                                                                                                                                                                                                                                                              |
+| 52  | No real email and no visitor uploads in demo mode                                                                                             | Visitor-typed recipients and files are abuse vectors on a public demo                                                                                                                                                                                   | Rate limits alone                                                                                                                                                                                                                                                                                     |
