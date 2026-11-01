@@ -1,6 +1,6 @@
 import { and, eq } from "drizzle-orm";
 
-import { isRole, type Role } from "@/domain/roles";
+import { isRole, type ActorRole, type Role } from "@/domain/roles";
 import { getDb } from "@/server/db/client";
 import { member } from "@/server/db/schema";
 
@@ -11,8 +11,14 @@ import { member } from "@/server/db/schema";
 export type AuthContext = {
   userId: string;
   organizationId: string;
-  role: Role;
+  role: ActorRole;
 };
+
+/**
+ * The context of a signed-in member: `role` is a real member role (never `api`), which is what
+ * pages need to pick a home or a label. Assignable to `AuthContext`, so services accept it.
+ */
+export type MemberAuthContext = AuthContext & { role: Role };
 
 /**
  * Builds the AuthContext for a session. The role is read from the membership row on every
@@ -22,7 +28,7 @@ export type AuthContext = {
 export async function resolveAuthContext(session: {
   userId: string;
   activeOrganizationId?: string | null;
-}): Promise<AuthContext | null> {
+}): Promise<MemberAuthContext | null> {
   const organizationId = session.activeOrganizationId;
   if (!organizationId) return null;
 

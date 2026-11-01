@@ -6,6 +6,7 @@ import type { Random } from "@/lib/random";
 import { distanceAlong, measureRoute, pointAlong, type MeasuredRoute } from "@/lib/route-geometry";
 import type { AuthContext } from "@/server/auth/auth-context";
 import type { Shipment } from "@/server/db/schema";
+import { sampleProof } from "@/server/demo/sample-proof";
 import { roadRoutes, routeBetween } from "@/server/routes/road-routes";
 import { assignDriver } from "@/server/services/assign-driver";
 import { changeShipmentStatus } from "@/server/services/change-shipment-status";
@@ -122,6 +123,8 @@ export function createSimulator(options: SimulatorOptions) {
   const clock = options.clock ?? (() => new Date());
   const log = options.log ?? (() => {});
   const memory = new Map<string, TruckMemory>();
+  /** Varies the sample proofs (signed or not, with or without a photo) from one delivery to the next. */
+  let simulatedDeliveries = 0;
   /** Trucks the log already said it skips, so the reason is not repeated every tick. */
   const skipNoted = new Set<string>();
 
@@ -276,7 +279,14 @@ export function createSimulator(options: SimulatorOptions) {
           publicNote: action.publicNote,
           location: place,
         },
-        { now: () => now },
+        {
+          now: () => now,
+          // The demo's deliveries come with sample proof (nothing real is captured or stored).
+          proof:
+            action.toStatus === "delivered"
+              ? sampleProof(shipment.recipientName, simulatedDeliveries++)
+              : undefined,
+        },
       );
       record(result.ok ? "ok" : result.reason);
       // A dispatcher may have changed the shipment meanwhile: keep the old memory and re-plan

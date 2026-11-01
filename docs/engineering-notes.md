@@ -358,3 +358,113 @@ stuck forever.
 - **Chosen:** read ownership from the append-only history each tick. If the truck's driver
   recorded the exception, the driver clears it; otherwise it waits for the office. It mirrors real
   ownership, survives restarts and needs no new state.
+
+## A public API on top of services built for sessions
+
+**Problem.** Every service takes an `AuthContext` built from a signed-in member. An API key has no
+member behind it, yet it must obey exactly the same rules (tenant scope, status rules, concurrency)
+without a fake role leaking into the auth library or the UI.
+
+**Approach.** A widened `ActorRole` (`member roles | "api"`) on `AuthContext`, and a narrower
+`MemberAuthContext` for everything session-based. The compiler forces every permission function and
+its test to decide what `api` may do (a dispatcher's permissions). Keys are 32 random bytes shown
+once; only a SHA-256 hash is stored and looked up through a unique index, so the secret is never
+compared and needs no constant-time check.
+
+**Concurrency over HTTP.** `ETag` is the shipment version, and status changes require `If-Match`:
+`428` without it, `412` with the current ETag when it is stale. It is the same lost-update guarantee
+the dashboard forms have, proven with the same forced-race test over real HTTP: exactly one request
+gets `200`, the other `412`, and one history event is written.
+
+**Options rejected.** Adding `api` as a member role (it would become assignable in the UI); a
+parallel permission model for keys (two sets of rules that drift). The OpenAPI document is
+hand-written, with tests tying it to the route files and response projections so it cannot drift.
+
+## Webhooks on serverless: no worker, no double delivery, no SSRF
+
+**Problem.** Customers register URLs to hear about shipment changes. Deliveries must never be
+invented (a rolled-back change), lost (a crash mid-send) or duplicated by two concurrent drains, and
+the free hosting plan has no background worker and only a daily cron.
+
+**Approach.**
+
+- An outbox row is written in the same transaction as the change, so a delivery exists only if the
+  change committed.
+- The first attempt runs right after the response via Next's `after()`; retries are drained by app
+  and API activity behind a 30-second global throttle, with the daily cron as a backstop.
+- A drain claims due rows in a short transaction with `FOR UPDATE SKIP LOCKED`, counts the attempt
+  and sets a 2-minute lease, then sends with no transaction open. Concurrent drains skip each other's
+  rows; a crashed drain's row comes back after the lease.
+- Signatures are HMAC-SHA256 over `timestamp.body` with a 5-minute replay window; receivers verify
+  with the snippet in `docs/api.md`.
+
+**SSRF and DNS rebinding.** Checking a URL when it is saved is not enough: the name can later
+resolve to an internal address. At every delivery the host is resolved, every returned address is
+classified (private, loopback, link-local, CGNAT, metadata, including IPv4 embedded in IPv6), and the
+connection is pinned to the vetted address through a custom `lookup`, so there is no second DNS query
+to rebind. Redirects are never followed.
+
+**Options rejected.** One long transaction per batch (holds locks across slow HTTP calls); advisory
+locks (no per-row visibility); a claim `UPDATE` without `SKIP LOCKED` (drains queue on the same rows).
+At scale the outbox feeds a hosted queue instead of activity-driven drains.
+
+## Customer email without double sends or leaked staff notes
+
+**Problem.** Customers get an email on key status changes. A retry, a duplicate enqueue or the
+provider's own retry must never produce two emails, staff-only notes must never reach a customer,
+and an unsubscribe must hold even for an email already queued.
+
+**Approach.** The message is rendered and stored inside the status change's transaction, so staff see
+exactly what the customer got and a rolled-back change sends nothing. The template's input type has
+no internal-note field, so a caller cannot leak one by accident. Each email has an idempotency key
+derived from the history event id (unique index, and sent to Resend as `Idempotency-Key`), so every
+retry is the same email. Opt-outs are per organization and address and are checked at queue time and
+again at send time. Unsubscribe links carry an HMAC-signed token, and the link opens a confirm page
+whose button posts, so mail scanners that follow links cannot unsubscribe anyone.
+
+**Without a key, and in the demo.** Without Resend credentials, and always in demo mode, messages go
+to a stored preview that admins can read, so the whole flow is demonstrable without sending real
+email to addresses visitors typed.
+
+## Proof of delivery, and a CSP test that caught a bundling bug
+
+**Problem.** Drivers capture a printed name, a drawn signature and an optional photo on delivery.
+Proof must be atomic with the "delivered" event, photos must be private and free of location data,
+and a public demo must never store visitor files.
+
+**Approach.** The proof row is written in the same transaction as the status change (an append-only
+table, like history); the photo uploads first and is deleted again if the transaction does not
+commit. Signatures are compact vector strokes, rendered as SVG in React. Photos are accepted as JPEG
+or PNG by magic bytes, stripped of EXIF/XMP server-side by walking file segments (no dependency), and
+streamed to staff through an authenticated route, so the storage key never reaches a browser and the
+CSP needs no new origin. The printed name is the proof, so keyboard users can complete a delivery
+without drawing. The public page and webhooks only learn "signed by <name>".
+
+**Bug story.** After the first UI commit the CSP end-to-end test failed on the driver pages with a
+blocked `eval`. The signature pad imported a constant from a module that also imported Zod, and
+Zod 4 probes `new Function` when it loads. Rather than loosening the CSP, the client-side constants
+moved to a schema-free module, and "no Zod in client bundles" became a project rule. A CSP test that
+runs on every surface is what turned a silent risk into a red build.
+
+## An LLM feature that cannot book, leak or invent
+
+**Problem.** Dispatchers paste a customer's shipment request email and get a prefilled booking form.
+The email is untrusted input to a language model: a hostile email could try to make the feature act,
+exfiltrate data, or slip invented values into a booking.
+
+**Approach.** Structured output with no tools (a tool is an action surface), and a system prompt
+that treats the email as data placed between random per-request markers. The server then treats the
+model's answer as untrusted too: unknown keys are dropped, units and countries are normalized, every
+value must pass the same field rules as manual booking, and values that cannot be paraphrased
+(email, reference, postal code) must literally appear in the email or they are dropped as invented.
+The result is an editable draft; only a person can book it, through the normal path. Calls are capped
+per organization per day (and globally in the demo) with the existing Postgres counters, counted
+before the model call so failures cost quota too.
+
+**Honest limit.** This stops invented and invalid values, not values the attacker's own text
+supplies: if an injected email contains an address, a misled model could put it in the draft. Human
+review is the final control, and a test states that limit explicitly.
+
+**Evaluation.** Eight fixtures (English, German, French, one prompt injection, one with missing
+fields) run through the validation layer in CI with recorded answers; `pnpm intake:eval` measures
+field-level accuracy against the live model when a key is configured.

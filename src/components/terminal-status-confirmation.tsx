@@ -16,8 +16,10 @@ import { isShipmentStatus, isTerminalStatus, type ShipmentStatus } from "@/domai
 
 /**
  * A confirm step before a status that cannot be undone (delivered, cancelled), shared by the
- * dashboard's status form and the driver app. Architect decision until proof of delivery (Phase 3)
- * replaces the step for deliveries.
+ * dashboard's status form and the driver app. In the driver app a delivery does not use it: the
+ * driver's "Mark as delivered" opens the delivery sheet (printed name, signature, photo), which is
+ * the confirmation. Staff marking a delivery from the dashboard still confirm here, and record no
+ * proof (see `requiresDeliveryProof`).
  *
  * How it works: the form's `onSubmit` checks the status being submitted (from the pressed button
  * or the select). For a terminal status it cancels the submission and opens an alert dialog

@@ -5,6 +5,12 @@ import { securityHeaders } from "./src/lib/security-headers";
 const nextConfig: NextConfig = {
   cacheComponents: true,
   partialPrefetching: true,
+  experimental: {
+    // The driver app's delivery sends a photo (shrunk to about 0.5 MB in the browser, 4 MB at
+    // most on the server) in the Server Action's request. Next's default is 1 MB. 4.5 MB is
+    // Vercel's own request body limit, so the platform is the ceiling either way.
+    serverActions: { bodySizeLimit: "4.5mb" },
+  },
   turbopack: {
     rules: {
       "*.css": {

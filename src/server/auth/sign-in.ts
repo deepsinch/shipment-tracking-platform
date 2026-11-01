@@ -8,7 +8,7 @@ import { getDb } from "@/server/db/client";
 import { session } from "@/server/db/schema";
 
 import { getAuth } from "./auth";
-import { resolveAuthContext, type AuthContext } from "./auth-context";
+import { resolveAuthContext, type MemberAuthContext } from "./auth-context";
 import { clearRateLimit, consumeRateLimit, RATE_LIMITS, type RateLimited } from "./rate-limit";
 
 export const signInSchema = z.object({
@@ -21,7 +21,7 @@ export type SignInResult =
    * `context` is the new session's AuthContext, so the caller can send the user to their role's
    * home. Null for a user without an organization (see "Known issues" in implementation-notes).
    */
-  | { ok: true; context: AuthContext | null }
+  | { ok: true; context: MemberAuthContext | null }
   /** Malformed input, unknown email and wrong password all look the same to the caller. */
   | { ok: false; reason: "invalid" }
   | RateLimited;
@@ -71,7 +71,7 @@ export async function signIn(
 }
 
 /** The AuthContext for a just-created session, read from the row the session hook wrote. */
-async function contextOfSession(token: string, userId: string): Promise<AuthContext | null> {
+async function contextOfSession(token: string, userId: string): Promise<MemberAuthContext | null> {
   const [row] = await getDb()
     .select({ activeOrganizationId: session.activeOrganizationId })
     .from(session)

@@ -5,13 +5,20 @@ import { notFound } from "next/navigation";
 import { cache } from "react";
 
 import { DemoLive } from "@/components/demo/demo-live";
+import { ProofOfDeliveryCard } from "@/components/delivery/proof-of-delivery-card";
 import { LiveRefresh } from "@/components/realtime/live-refresh";
 import { StatusBadge } from "@/components/status-badge";
 import { ShipmentHistory } from "@/components/shipment-history";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SERVICE_LEVEL_LABELS } from "@/domain/service-level";
-import { canAssignDrivers, canChangeDriver, statusOptionsFor } from "@/domain/shipment-permissions";
+import { canViewEmailStatus } from "@/domain/email";
+import {
+  canAssignDrivers,
+  canChangeDriver,
+  canViewDeliveryPhoto,
+  statusOptionsFor,
+} from "@/domain/shipment-permissions";
 import { isTerminalStatus } from "@/domain/shipment-status";
 import { RouteMap } from "@/components/map/route-map";
 import type { Stop } from "@/components/map/route-map-canvas";
@@ -22,9 +29,11 @@ import type { Shipment } from "@/server/db/schema";
 import { routeBetween } from "@/server/routes/road-routes";
 import { getShipment } from "@/server/services/get-shipment";
 import { getShipmentPositions } from "@/server/services/get-shipment-positions";
+import { getShipmentEmailStatus } from "@/server/services/email-notifications";
 import { listDrivers } from "@/server/services/list-drivers";
 
 import { AssignDriverForm } from "./assign-driver-form";
+import { EmailNotifications } from "./email-notifications";
 import { LastSeen } from "./last-seen";
 import { StatusChangeForm } from "./status-change-form";
 
@@ -44,12 +53,17 @@ export async function generateMetadata({
 }
 
 export default async function ShipmentPage({ params }: PageProps<"/dashboard/shipments/[id]">) {
-  const { ctx, shipment, assignedDriverName, events } = await loadShipment((await params).id);
+  const { ctx, shipment, assignedDriverName, events, proof } = await loadShipment(
+    (await params).id,
+  );
   const options = statusOptionsFor(ctx.role, shipment.status);
   // Only staff reach this page, but the role rule decides, not the route.
   const driverList = canAssignDrivers(ctx.role) ? await listDrivers(ctx) : null;
   const drivers = driverList?.ok ? driverList.drivers : null;
   const lastPosition = await loadLastPosition(ctx, shipment);
+  const emailResult = canViewEmailStatus(ctx.role)
+    ? await getShipmentEmailStatus(ctx, shipment.id)
+    : null;
 
   return (
     <main className="flex flex-col gap-6">
@@ -134,6 +148,14 @@ export default async function ShipmentPage({ params }: PageProps<"/dashboard/shi
               )}
             </CardContent>
           </Card>
+          {shipment.status === "delivered" && (
+            <ProofOfDeliveryCard
+              proof={proof}
+              shipmentId={shipment.id}
+              canViewPhoto={canViewDeliveryPhoto(ctx.role)}
+            />
+          )}
+          {emailResult?.ok && <EmailNotifications status={emailResult} />}
         </div>
         <ShipmentHistory events={events} className="lg:col-span-2" />
       </div>

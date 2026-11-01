@@ -210,6 +210,140 @@ describe("demo", () => {
   });
 });
 
+describe("webhooks", () => {
+  it("refuses local targets by default", () => {
+    expect(createEnv({}).webhooks).toEqual({ allowLocalTargets: false });
+    expect(createEnv({ WEBHOOKS_ALLOW_LOCAL_TARGETS: "" }).webhooks.allowLocalTargets).toBe(false);
+    expect(createEnv({ WEBHOOKS_ALLOW_LOCAL_TARGETS: "false" }).webhooks.allowLocalTargets).toBe(
+      false,
+    );
+  });
+
+  it("allows them when switched on locally", () => {
+    expect(createEnv({ WEBHOOKS_ALLOW_LOCAL_TARGETS: "true" }).webhooks.allowLocalTargets).toBe(
+      true,
+    );
+  });
+
+  it("refuses the flag on Vercel and in demo mode, so a hosted app cannot reach localhost", () => {
+    const flag = { WEBHOOKS_ALLOW_LOCAL_TARGETS: "true" };
+    expect(() => createEnv({ ...flag, VERCEL: "1" }).webhooks).toThrow(
+      /WEBHOOKS_ALLOW_LOCAL_TARGETS must not be set on Vercel or in demo mode/,
+    );
+    expect(() => createEnv({ ...flag, DEMO_MODE: "true" }).webhooks).toThrow(
+      /WEBHOOKS_ALLOW_LOCAL_TARGETS must not be set/,
+    );
+  });
+
+  it("rejects anything but true or false", () => {
+    expect(() => createEnv({ WEBHOOKS_ALLOW_LOCAL_TARGETS: "yes" }).webhooks).toThrow(
+      /WEBHOOKS_ALLOW_LOCAL_TARGETS must be "true" or "false"/,
+    );
+  });
+});
+
+describe("email", () => {
+  const KEYS = { RESEND_API_KEY: "re_123", EMAIL_FROM: "Waybill <hi@example.com>" };
+
+  it("previews messages without any configuration", () => {
+    expect(createEnv({}).email).toEqual({
+      resendApiKey: undefined,
+      from: undefined,
+      transport: "preview",
+    });
+    expect(createEnv({ RESEND_API_KEY: "", EMAIL_FROM: "" }).email.transport).toBe("preview");
+  });
+
+  it("sends through Resend with both variables", () => {
+    expect(createEnv(KEYS).email).toMatchObject({ transport: "resend", from: KEYS.EMAIL_FROM });
+  });
+
+  it("insists on both variables together", () => {
+    expect(() => createEnv({ RESEND_API_KEY: "re_123" }).email).toThrow(
+      /EMAIL_FROM is required when RESEND_API_KEY is set/,
+    );
+    expect(() => createEnv({ EMAIL_FROM: "a@b.c" }).email).toThrow(
+      /RESEND_API_KEY is required when EMAIL_FROM is set/,
+    );
+  });
+
+  it("never sends in demo mode, and does not complain about leftover settings", () => {
+    expect(createEnv({ ...KEYS, DEMO_MODE: "true" }).email.transport).toBe("preview");
+    expect(createEnv({ RESEND_API_KEY: "re_123", DEMO_MODE: "true" }).email.transport).toBe(
+      "preview",
+    );
+  });
+
+  it("does not echo the API key when it is rejected", () => {
+    expect(() => createEnv({ RESEND_API_KEY: "re_secret_value" }).email).not.toThrow(
+      /re_secret_value/,
+    );
+  });
+});
+
+describe("photos", () => {
+  it("are off without a Blob token", () => {
+    expect(createEnv({}).photos).toEqual({ blobToken: undefined, enabled: false });
+    expect(createEnv({ BLOB_READ_WRITE_TOKEN: "" }).photos.enabled).toBe(false);
+  });
+
+  it("are on with a token", () => {
+    expect(createEnv({ BLOB_READ_WRITE_TOKEN: "vercel_blob_rw_x" }).photos.enabled).toBe(true);
+  });
+
+  it("are never on in demo mode, even with a token left over", () => {
+    expect(
+      createEnv({ BLOB_READ_WRITE_TOKEN: "vercel_blob_rw_x", DEMO_MODE: "true" }).photos.enabled,
+    ).toBe(false);
+  });
+});
+
+describe("intake", () => {
+  it("is off without a key", () => {
+    expect(createEnv({}).intake).toEqual({
+      apiKey: undefined,
+      model: undefined,
+      useFake: false,
+      enabled: false,
+    });
+    expect(createEnv({ ANTHROPIC_API_KEY: "" }).intake.enabled).toBe(false);
+  });
+
+  it("is on with a key, and the model id can be overridden", () => {
+    expect(
+      createEnv({ ANTHROPIC_API_KEY: "sk-ant-x", INTAKE_MODEL: "claude-x" }).intake,
+    ).toMatchObject({
+      enabled: true,
+      model: "claude-x",
+      useFake: false,
+    });
+  });
+
+  it("allows the recorded-answers fake for tests, and refuses it on Vercel and in demo mode", () => {
+    expect(createEnv({ INTAKE_USE_FAKE_MODEL: "true" }).intake).toMatchObject({
+      useFake: true,
+      enabled: true,
+    });
+    for (const where of [{ VERCEL: "1" }, { DEMO_MODE: "true" }]) {
+      expect(() => createEnv({ INTAKE_USE_FAKE_MODEL: "true", ...where }).intake).toThrow(
+        /INTAKE_USE_FAKE_MODEL must not be set on Vercel or in demo mode/,
+      );
+    }
+  });
+
+  it("works in demo mode with a real key", () => {
+    expect(createEnv({ ANTHROPIC_API_KEY: "sk-ant-x", DEMO_MODE: "true" }).intake.enabled).toBe(
+      true,
+    );
+  });
+
+  it("does not echo the key when the group is rejected", () => {
+    expect(
+      () => createEnv({ ANTHROPIC_API_KEY: "sk-ant-secret", INTAKE_USE_FAKE_MODEL: "yes" }).intake,
+    ).not.toThrow(/sk-ant-secret/);
+  });
+});
+
 describe("validateEnv", () => {
   it("returns every group for a valid environment", () => {
     const env = validateEnv(valid);

@@ -50,6 +50,34 @@
       "when": 1793524599704,
       "tag": "0006_demo_tick_state",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1793554165064,
+      "tag": "0007_api_keys",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1793556313165,
+      "tag": "0008_webhooks",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1793557299768,
+      "tag": "0009_email",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1793559335898,
+      "tag": "0010_delivery_proofs",
+      "breakpoints": true
     }
   ]
 }

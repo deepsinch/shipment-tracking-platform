@@ -139,7 +139,7 @@ export const shipmentEvents = pgTable(
     locationCity: text("location_city"),
     locationLat: doublePrecision("location_lat"),
     locationLng: doublePrecision("location_lng"),
-    /** Shown on the public tracking page. */
+    /** Shown on the public tracking page and in the customer's status email. */
     publicNote: text("public_note"),
     /** Visible to the organization only. */
     internalNote: text("internal_note"),

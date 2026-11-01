@@ -39,7 +39,7 @@ Checkpoints:
    demo sign-in, `/api/cron/reset-demo`, globally throttled `/api/demo/tick`, and a click-by-click
    deployment guide for the owner (`docs/deployment.md`).
 
-After Phase 4a: **Phase 3** (checkpoints below, under "Next: Phase 3"), then the rest of Phase 4. Phase 2 delivered, checkpoint
+**Now: Phase 3** on branch `phase-3-integrations` (checkpoints under "Next: Phase 3"; design in `docs/architecture.md`, "Phase 3: integrations"), then the rest of Phase 4. Phase 2 delivered, checkpoint
 by checkpoint (design and as-built notes in `docs/architecture.md`, "Phase 2: live tracking"):
 
 1. **[done] Driver app and reassignment.** `/driver` (mobile-first, assigned shipments, big-button status
@@ -77,27 +77,42 @@ by checkpoint (design and as-built notes in `docs/architecture.md`, "Phase 2: li
 
 Each checkpoint green and reviewed, like Phase 2. Suggested order (later ones build on earlier):
 
-1. **Public API with API keys.** `api_keys` table (hashed key, prefix for display, organization,
-   scopes, last used, revoked), admin UI to create and revoke (shown once). Route handlers under
-   `/api/v1` (list, get, create shipments; change status) over the existing services, with an
-   `AuthContext` for the key. Zod at the boundary, explicit response projections with key-set tests,
-   per-key rate limits (decision 11's counters). Concurrency over HTTP: `ETag` = shipment version,
-   `If-Match` required on status changes (`412` on mismatch, `428` without), so API clients get the
-   same lost-update protection as forms. OpenAPI document.
-2. **Signed, retried webhooks.** Endpoints per organization (URL, secret, event types), an outbox
+1. **[done] Public API with API keys.** `api_keys` table (migration 0007: hashed key, display
+   prefix, organization, scopes with CHECKs, creator, last used, revoked), key services, admin UI
+   at `/dashboard/settings/api-keys` (shown once, revoke with confirm), route handlers under
+   `/api/v1` (list, get, create shipments; change status; public tracking) over the existing
+   services with an `api` `AuthContext`. Explicit projections with key-set tests, RFC 9457 errors,
+   per-key and per-IP rate limits (decision 11's counters), `ETag` = shipment version and
+   `If-Match` required on status changes (`412` / `428`), a hand-written OpenAPI 3.1 document at
+   `/api/v1/openapi.json`, and `docs/api.md`. Design and decisions 53 to 57 in
+   `docs/architecture.md`.
+2. **[done] Signed, retried webhooks.** Endpoints per organization (URL, secret, event types), an outbox
    table written in the same transaction as the change (like `pg_notify` today), a delivery worker
    with exponential backoff and a dead-letter state, HMAC-SHA256 signatures with a timestamp
    (replay window), a delivery log in the UI with "resend". Decide where the worker runs (Vercel Cron
    or a queue) before building.
-3. **Email notifications via Resend.** Customer emails on chosen status changes (recipient email
+3. **[done] Email notifications via Resend.** Customer emails on chosen status changes (recipient email
    already stored), from the same outbox; templates with the public tracking link; idempotency key
    per event; unsubscribe link; test mode without a key in development.
-4. **Proof of delivery.** Photo and signature captured in the driver app on delivery, uploaded to
-   object storage (private, signed URLs), linked to the `delivered` event; replaces the client-side
-   confirm step for deliveries and gives the public page a "signed by" line (no photo publicly).
-5. **AI intake of shipment request emails.** Inbound email (webhook from the mail provider) parsed
-   by an LLM into a draft shipment (structured output validated by the same Zod schema), shown to a
-   dispatcher for review before `createShipment`; never auto-booked. Evaluate on a small fixture set.
+4. **[done] Proof of delivery.** Printed name (required), drawn signature (optional, vector strokes) and
+   photo (optional, private Vercel Blob) captured in the driver app's delivery sheet, written with the
+   `delivered` event in one transaction (`delivery_proofs`, migration 0010, append-only). Replaces the
+   confirm step for drivers' deliveries; staff can still mark a delivery from the office (confirm
+   dialog, recorded as no proof). The public page, webhook and email say who signed, nothing more.
+5. **[done] AI intake of shipment request emails.** "Paste a request email" on the new-shipment page
+   (admins and dispatchers, only with `ANTHROPIC_API_KEY`): the model's structured answer is checked
+   field by field against `createShipmentSchema`'s rules and prefills the normal form as a draft; a
+   person books it. Daily caps on the Postgres counters, eight fixtures, `pnpm intake:eval` for the
+   live model.
+
+**Phase 3 is complete** (public API, webhooks, email, proof of delivery, AI intake). Known gaps
+across the phase, none blocking: no retention or erasure for delivery proofs and photos (decision 70);
+no retention job for old webhook deliveries and email messages; webhook retries and emails wait for
+activity or the daily cron on a quiet Hobby deployment; the delivery log and the email status on
+the shipment page do not update live; the Resend, Vercel Blob and Anthropic adapters have only been
+exercised against local fakes and mocked SDKs (the owner should send one real email, deliver once
+with a photo and run `pnpm intake:eval` after adding each key); intake has no inbound-email
+webhook, no attachments and no batch of several shipments.
 
 ## Roadmap
 
@@ -763,6 +778,191 @@ import.meta.url).href)` makes Turbopack emit the worker to `/_next/static/media/
   scheme; `CRON_SECRET` arrives as `Authorization: Bearer …`; Neon's `DATABASE_URL` is pooled,
   `DATABASE_URL_UNPOOLED` direct; previews get branch `preview/<git-branch>`.
 - **Still the owner's job:** the dashboard steps (the README already links the live demo).
+
+### Public API (Phase 3, checkpoint 1)
+
+- **`api` is not a member role.** `ROLES` / `Role` are what Better Auth stores; `ActorRole`
+  (`Role | "api"`) is what `AuthContext.role` and the permission functions take. Server-side
+  session helpers return `MemberAuthContext` (`role: Role`) so `homePathFor` and `ROLE_LABELS`
+  stay total. If you add a permission function, add the `api` row to its test (the tests are
+  `Record<ActorRole, ...>`, so a missing row is a type error).
+- **Events made through the API are attributed to the key's creating admin** (the context's
+  `userId`), so the history shows that admin's name. Decision 54 records the alternative.
+- **Route files may only export handlers** (Next rejects other exports), so shared constants live
+  in `src/server/api/` (`request-fields.ts`), which the OpenAPI test imports.
+- **Route handlers are tested by calling them** with a constructed `Request` and
+  `{ params: Promise.resolve(...) }`, like `app/api/realtime`. The helper lives in
+  `src/app/api/v1/api.integration.test.ts`. Give every call its own random `x-forwarded-for`, or
+  one test's failed-key attempts count against the next test's per-IP limit.
+- **The forced race over HTTP** uses two keys so the two requests do not queue on one rate-limit
+  counter (it would be a second lock to wait on); only the held shipment row blocks them.
+- **A CHECK cannot take bind parameters**, so the scopes CHECK is emitted from the `API_SCOPES`
+  constant as a literal array (`sql.raw`). Adding a scope later means a migration that replaces
+  `api_keys_scopes_known`.
+- **`drizzle-kit` names migrations randomly**; rename the SQL file and the `tag` in
+  `meta/_journal.json` together (0007 is `0007_api_keys`).
+- **Mobile navigation:** the dashboard header nav is hidden below `sm`, so the API keys link, like
+  Live map, is desktop-only; the page itself works at 390px.
+- **Not done on purpose:** no CORS (server-to-server API), no key rotation or expiry, no per-key
+  event attribution, no audit log of key use beyond `last_used_at` (minute granularity).
+
+### Signed, retried webhooks (Phase 3, checkpoint 2)
+
+Design in `docs/architecture.md` ("Webhooks without a long-running worker", "As built (checkpoint 2)"),
+decisions 58 to 62; receivers' guide in `docs/api.md` ("Webhooks").
+
+- **Where things are.** Pure: `src/domain/{ip-address,webhook-url,webhook-signature,webhooks}.ts`.
+  I/O: `src/server/webhooks/` (`destination.ts` SSRF guard, `transport.ts` pinned POST, `payloads.ts`,
+  `drain-throttle.ts`, `schedule.ts` the two `after()` hooks) and `src/server/services/webhook-{outbox,delivery,endpoints}.ts`.
+  UI: `/dashboard/settings/webhooks`.
+- **Services must enqueue inside their transaction** (`enqueueShipmentCreated` and friends, next to
+  `announceShipmentChange`). A new write path that changes what an event says needs the same call.
+- **Never `await` a delivery in a request.** Use `deliverOutboxAfterResponse()` after a change and
+  `drainOutboxOnActivity()` for the throttled heartbeat. They are no-ops outside a Next request
+  scope (the helper swallows the "outside a request scope" error), so tests and CLI scripts leave
+  rows queued; the simulator script and the seed therefore do not deliver webhooks.
+- **A drain claims every due row in the database.** Integration tests that count deliveries park the
+  other open rows first (`beforeEach` in `webhook-delivery.integration.test.ts`); test endpoints use a
+  `.invalid` URL by default (`tests/integration/webhooks.ts`) so a stray drain never leaves the machine.
+  Tests pass `policy` / `resolve` / `transport` through `DeliveryDeps` instead of touching env.
+- **Local receivers:** tests and the e2e spec use `127.0.0.1` URLs. The e2e server runs with
+  `WEBHOOKS_ALLOW_LOCAL_TARGETS=true` (set in `playwright.config.ts` for the main server only);
+  `createEnv` refuses the flag when `VERCEL` is set or demo mode is on. `localhost` as a name may
+  resolve to `::1` first on some machines; use the literal in tests.
+- **A CHECK with `IN (...)` is NULL-valued for a NULL column**, and a CHECK passes on NULL. The first
+  version of `webhook_endpoints_disabled_reason_matches` let `enabled = false` with no reason through;
+  the schema test caught it (`IS NOT NULL` was added). Check the NULL case of every such constraint.
+- **Zod list errors are keyed `eventTypes.2`.** `validationFailure(error, { "eventTypes.": "eventTypes" })`
+  folds them onto the one field the form shows. The save-time URL check also runs when another field
+  failed, so one submit reports every problem.
+- **Proven red:** without the outbox call inside the transaction the rollback test fails; without
+  `SKIP LOCKED` the forced race blocks (and "many concurrent drains" hangs); without the lease the
+  mid-request drain sends the delivery twice; with the address check disabled all six SSRF tests fail;
+  without the membership join four API-key tests fail.
+- **Mobile navigation:** like API keys, the Webhooks link is in the desktop header only; the page
+  works at 390 px (checked, no horizontal scroll).
+- **Known gaps:** no retention job for old deliveries (rows are kept; add to the daily purge when the
+  log grows); a retry waits for activity or the daily cron, so on a quiet Hobby deployment a 1-minute
+  retry may happen hours later (documented in `docs/api.md`); the delivery log does not update live
+  (reload to see results).
+
+### Email notifications (Phase 3, checkpoint 3)
+
+Design in `docs/architecture.md` ("Email", "As built (checkpoint 3)"), decisions 63 to 66; enabling
+Resend in `docs/deployment.md`.
+
+- **Where things are.** Pure: `src/domain/{email,unsubscribe-token}.ts`, `src/server/email/templates.ts`.
+  I/O: `src/server/email/{transports,unsubscribe}.ts`, `src/server/services/email-{outbox,delivery,notifications}.ts`.
+  UI: the "Customer emails" card on the shipment page, `/dashboard/settings/email-previews`, public
+  `/unsubscribe/[token]`.
+- **The scheduling helpers were renamed** `deliverOutboxAfterResponse` and `drainOutboxOnActivity`:
+  they now drain webhook deliveries and emails together. New write paths that queue either call them.
+- **Queue inside the transaction, render there too.** `enqueueStatusEmail` runs in
+  `changeShipmentStatus`'s transaction. Add the same call for any new event that should email.
+- **Internal notes cannot reach an email:** `renderStatusEmail`'s input has no such field. Keep it so;
+  the outbox test (internal note never in the stored message) was proven red by passing one in.
+- **Preview is a state of the same row, not a second store.** A queued message becomes `succeeded`
+  with `transport = 'preview'` when the preview transport "sends" it, so previews only list messages
+  that have been drained. In tests call `drainDueEmails(..., { transport: previewTransport })`.
+- **Env:** `RESEND_API_KEY` and `EMAIL_FROM` are validated together (one without the other is an
+  error, except in demo mode where both are ignored). Integration tests rely on `BETTER_AUTH_SECRET`
+  and `BETTER_AUTH_URL` from `.env` (CI writes them) because links and tokens are built from them.
+- **Resend adapter:** plain `fetch`, checked against https://resend.com/docs/api-reference/emails/send-email
+  (header `Idempotency-Key`, 256 characters at most, 24 hours; body `from`, `to`, `subject`, `text`,
+  `html`, `headers`). Never called live from tests or CI; `createResendTransport({ baseUrl })` points at
+  a local fake. Not exercised against the real API from this environment.
+- **Email status on the shipment page does not update live:** the realtime refresh fires at commit,
+  before the message is sent. A reload shows Preview only or Sent.
+- **A drain claims every due email in the database,** like the webhook drain: the delivery tests park
+  other open rows first (`beforeEach`).
+- **Proven red:** internal note leaked into the template, enqueue outside the transaction, no opt-out
+  check at queue time or at send time, and a changing idempotency key each fail their tests.
+- **Mobile navigation:** the Emails link is in the desktop header only; both pages were checked at
+  390 px (no horizontal scroll).
+
+### Proof of delivery (Phase 3, checkpoint 4)
+
+Design in `docs/architecture.md` ("Proof of delivery", "As built (checkpoint 4)"), decisions 67 to 72;
+enabling Blob in `docs/deployment.md`.
+
+- **Where things are.** Pure: `src/domain/delivery-proof.ts` (signature schema and caps, SVG path
+  building, photo sniffing and metadata stripping, `photoCaptureAvailable`),
+  `src/lib/signature-recorder.ts` (the pad's state machine), `src/lib/photo-resize.ts`.
+  I/O: `src/server/storage/` (`PhotoStorage` interface, Vercel Blob adapter, in-memory fake),
+  `services/deliver-shipment.ts` (validates, stores the photo, composes `changeShipmentStatus`),
+  `services/delivery-proof.ts` (staff read model, photo read), the photo route
+  `/dashboard/shipments/[id]/proof-photo`. UI: `delivery-sheet.tsx` (driver), `SignaturePad`,
+  `SignatureView`, `ProofOfDeliveryCard`.
+- **`changeShipmentStatus` takes `deps.proof`** (a validated `DeliveryProofRecord`) and writes the
+  `delivery_proofs` row after the event, inside the same transaction and before the webhook and
+  email enqueues, so those can mention it. A **driver cannot deliver without proof** (validation
+  error on `recipientName`); staff and API keys can, and no row is written. Seed and simulator pass
+  `sampleProof(...)` (generated signature, `demo/sample` photo key) for drivers' deliveries.
+- **No FK from `delivery_proofs.event_id` to `shipment_events`.** A table that other tables reference
+  cannot be truncated at all (Postgres answers `0A000` before any trigger runs), which turned the
+  existing "TRUNCATE is rejected" test for `shipment_events` red. Proofs are tied to their shipment
+  by the composite tenant FK and to their event by the one code path that writes both.
+- **Photo order of operations:** validate, gate (shipment visible and role allowed) before any
+  upload, upload under `delivery-proofs/<org>/<shipment>/<uuid>.<ext>`, run the transaction, delete
+  the photo if it did not commit. A crash in between leaves an unreferenced private file. Upload
+  has a 20 s timeout (`photo_failed` result, nothing delivered), found by a screenshot run with a
+  fake token where the SDK's retries made "Delivering..." hang.
+- **Server Action body limit raised to 4.5 MB** (`next.config.ts`, `experimental.serverActions`) for the
+  photo; server cap is 4 MB. The browser shrinks photos to 1600 px JPEG first (drops EXIF, fixes
+  rotation, converts HEIC/WebP); the server sniffs magic bytes, accepts JPEG and PNG only and strips
+  EXIF/XMP/IPTC/comments (JPEG) or `eXIf`/text chunks (PNG) itself. WebP is refused server-side.
+- **Preview of the photo before upload is a `data:` URL** (the CSP allows `data:` images, not `blob:`).
+  No CSP change was needed at all: the stored photo is proxied through the route (`img-src 'self'`).
+- **E2E:** the e2e server has no Blob token, so photo capture is hidden there. To look at the photo UI
+  run Playwright with `BLOB_READ_WRITE_TOKEN=anything`; do not submit a photo (it would try the real
+  store). Photos are covered by integration tests with the fake and the demo spec's sample photo.
+  Locate the proof card with `[data-testid=proof-of-delivery]:visible` (a hidden copy can exist).
+- **The delivery sheet pins the version** it was opened at, so a live refresh behind it cannot turn
+  the delivery into one of a changed shipment (conflict instead).
+- **Proven red:** proof written with `getDb()` instead of `tx` (rollback test), a public projection
+  that returns more than the name (key-set test), the photo storage factory ignoring `enabled`
+  (two tests: demo mode would build the Blob adapter).
+- **Known gaps:** no retention or erasure for proofs or photos (decision 70), no sweep of
+  unreferenced photos, the Blob adapter is not exercised against the real service from CI or this
+  environment (unit test with the SDK mocked), no way to add proof to a delivery afterwards, the
+  driver app does not show the proof after delivering, the sheet's photo and signature are lost if
+  the sheet is closed.
+- **Mobile navigation:** unchanged. Sheet, staff card and public page checked at 390 and 1280 px.
+
+### AI intake (Phase 3, checkpoint 5)
+
+Design in `docs/architecture.md` ("AI intake", "As built (checkpoint 5)"), decisions 73 to 77; enabling it
+in `docs/deployment.md`.
+
+- **Where things are.** Pure: `src/domain/intake.ts` (fields, limits, country, weight and date
+  normalizers, grounding check; no Zod, so the browser may import it). Server: `src/server/intake/`
+  (`model.ts` interface and fake, `anthropic-model.ts`, `prompt.ts`, `schema.ts`, `draft.ts`
+  `buildDraft`, `fixtures.ts`, `index.ts` `getIntakeModel`), `services/intake.ts`
+  `extractShipmentDraft`. UI: `dashboard/shipments/new/` (`intake-action.ts`, `intake-panel.tsx`,
+  `draft-note.tsx`, `new-shipment-workspace.tsx`; the form takes a `draft` prop and remounts, keyed
+  by the draft's id). `scripts/intake-eval.ts`.
+- **Env:** `ANTHROPIC_API_KEY`, `INTAKE_MODEL`, `INTAKE_USE_FAKE_MODEL` (group `intake`). The fake is
+  refused on Vercel and in demo mode and wins over a key. The e2e main server sets it
+  (`playwright.config.ts`); the demo server has no key, so its spec checks the panel is absent.
+- **SDK facts checked in the installed package** (`@anthropic-ai/sdk` 1.3): `messages.create` takes
+  `output_config: { effort, format: { type: "json_schema", schema } }`; no tools are sent, which
+  also sidesteps forced `tool_choice`, which several current models reject. `z.toJSONSchema` makes
+  the schema (delete `$schema`, `additionalProperties: false`). Not run against the live API here.
+- **Tests that matter:** the fixtures run through the fake and `buildDraft` (unit); grounding,
+  invalid-value, unknown-key and compromised-answer tests; adapter test with the SDK mocked (request
+  shape, no tools, email only in the user message, errors never log the email); service integration
+  tests (hidden without a key, forbidden for drivers, no shipment ever created, 20 KB cap in bytes,
+  50 per day then a refusal, the demo's global cap, a failed call still counts); e2e with the fake.
+- **Proven red:** removing the cap check (2 service tests red), and removing both the booking-rule
+  validation and the grounding check in `buildDraft` (6 red).
+- **Gotcha: client code must not import Zod.** `src/domain/intake.ts` stays schema-free for that
+  reason (see the proof-of-delivery CSP note); the Zod schemas are under `src/server/intake/`.
+- **Gotcha: the intake panel's `defaultValue` echo.** React resets uncontrolled fields after an
+  action, so the pasted text is echoed back through state, like every other form here.
+- **Known limits:** see architecture "Known limits". Notably an address present in the email's
+  injected text can still be drafted (a person reviews every field).
+- **Mobile navigation:** unchanged. The panel and the prefilled draft were checked at 390 and
+  1280 px (no horizontal scroll).
 
 ### Testing
 

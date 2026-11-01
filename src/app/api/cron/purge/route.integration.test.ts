@@ -42,7 +42,17 @@ describe("GET /api/cron/purge", () => {
     const response = await GET(request(`Bearer ${SECRET}`));
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ status: "purged" });
+    // The same daily call is the backstop that drains due webhook deliveries and customer emails.
+    expect(await response.json()).toMatchObject({
+      status: "purged",
+      webhooks: {
+        claimed: expect.any(Number),
+        succeeded: 0,
+        failed: expect.any(Number),
+        dead: expect.any(Number),
+      },
+      emails: { claimed: expect.any(Number), sent: expect.any(Number) },
+    });
     expect(await getDb().select().from(authRateLimits).where(eq(authRateLimits.key, key))).toEqual(
       [],
     );

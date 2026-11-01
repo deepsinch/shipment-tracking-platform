@@ -10,9 +10,11 @@ import { Card, CardContent, CardFooter } from "@/components/ui/card";
 import { FieldLegend, FieldSet } from "@/components/ui/field";
 import { Separator } from "@/components/ui/separator";
 import { SERVICE_LEVEL_LABELS, SERVICE_LEVELS } from "@/domain/service-level";
+import type { IntakeDraft } from "@/domain/intake";
 import type { DriverOption } from "@/server/services/list-drivers";
 
 import { createShipmentAction, type NewShipmentState } from "../actions";
+import { DraftNote } from "./draft-note";
 
 const SERVICE_LEVEL_OPTIONS = SERVICE_LEVELS.map((level) => ({
   value: level,
@@ -23,7 +25,14 @@ const SERVICE_LEVEL_OPTIONS = SERVICE_LEVELS.map((level) => ({
  * Field errors come from the service (`createShipment`), keyed by the same names as the inputs.
  * After a failed submission every value is echoed back, because React resets the form.
  */
-export function NewShipmentForm({ drivers }: { drivers: DriverOption[] }) {
+export function NewShipmentForm({
+  drivers,
+  draft,
+}: {
+  drivers: DriverOption[];
+  /** Values from AI intake to start from; a failed submission's own values win over them. */
+  draft?: IntakeDraft;
+}) {
   const [state, action, pending] = useActionState<NewShipmentState, FormData>(
     createShipmentAction,
     {},
@@ -31,7 +40,9 @@ export function NewShipmentForm({ drivers }: { drivers: DriverOption[] }) {
   const field = (name: string) => ({
     name,
     errors: state.fieldErrors?.[name],
-    defaultValue: state.values?.[name],
+    defaultValue:
+      (state.values?.[name] ?? (draft?.values as Record<string, string> | undefined)?.[name]) ||
+      undefined,
   });
 
   const driverOptions = [
@@ -44,6 +55,7 @@ export function NewShipmentForm({ drivers }: { drivers: DriverOption[] }) {
       <form action={action} noValidate>
         <CardContent className="flex flex-col gap-8">
           {state.formError && <FormAlert title={state.formError} />}
+          {draft && <DraftNote draft={draft} />}
 
           <FieldSet>
             <FieldLegend className="mb-3">Recipient</FieldLegend>
@@ -54,7 +66,7 @@ export function NewShipmentForm({ drivers }: { drivers: DriverOption[] }) {
                 label="Email (optional)"
                 type="email"
                 autoComplete="off"
-                description="For delivery updates in a later release."
+                description="We email delivery updates here. The customer can stop them with a link in the email."
               />
               <TextField
                 {...field("reference")}
@@ -85,7 +97,9 @@ export function NewShipmentForm({ drivers }: { drivers: DriverOption[] }) {
               />
               <SelectField
                 {...field("serviceLevel")}
-                defaultValue={state.values?.serviceLevel ?? "standard"}
+                defaultValue={
+                  state.values?.serviceLevel ?? (draft?.values.serviceLevel || "standard")
+                }
                 label="Service level"
                 options={SERVICE_LEVEL_OPTIONS}
               />

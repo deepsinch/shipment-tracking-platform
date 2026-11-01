@@ -10,6 +10,7 @@ import { requireAuthContext } from "@/server/auth/session";
 import { assignDriver } from "@/server/services/assign-driver";
 import { createShipment } from "@/server/services/create-shipment";
 import type { FieldErrors } from "@/server/services/results";
+import { deliverOutboxAfterResponse } from "@/server/webhooks/schedule";
 
 /**
  * Thin wiring between forms and services: the services own authorization and validation. These
@@ -66,6 +67,7 @@ export async function createShipmentAction(
         };
   }
 
+  deliverOutboxAfterResponse();
   revalidatePath(SHIPMENTS_PATH);
   redirect(shipmentPath(result.shipment.id));
 }
@@ -91,6 +93,7 @@ export async function assignDriverAction(
   });
 
   if (result.ok) {
+    deliverOutboxAfterResponse();
     revalidateShipment(shipmentId);
     return {
       outcome: "updated",

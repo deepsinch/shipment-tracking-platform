@@ -7,7 +7,7 @@ describe("robots.txt", () => {
     expect(robots().rules).toEqual({
       userAgent: "*",
       allow: "/",
-      disallow: ["/dashboard", "/driver", "/track", "/api", "/sign-in", "/sign-up"],
+      disallow: ["/dashboard", "/driver", "/track", "/unsubscribe", "/api", "/sign-in", "/sign-up"],
     });
   });
 });

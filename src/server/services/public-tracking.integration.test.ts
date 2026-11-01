@@ -68,6 +68,7 @@ describe("getPublicTracking", () => {
       "destination",
       "origin",
       "promisedDeliveryAt",
+      "signedBy",
       "status",
       "timeline",
       "trackingCode",
@@ -92,6 +93,7 @@ describe("getPublicTracking", () => {
       origin: { city: "Rotterdam", country: "NL" },
       destination: { city: "Antwerp", country: "BE" },
       promisedDeliveryAt: new Date("2026-12-01T17:00:00Z"),
+      signedBy: null,
       timeline: [
         {
           type: "created",
