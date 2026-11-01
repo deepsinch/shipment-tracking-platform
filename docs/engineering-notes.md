@@ -407,3 +407,21 @@ to rebind. Redirects are never followed.
 **Options rejected.** One long transaction per batch (holds locks across slow HTTP calls); advisory
 locks (no per-row visibility); a claim `UPDATE` without `SKIP LOCKED` (drains queue on the same rows).
 At scale the outbox feeds a hosted queue instead of activity-driven drains.
+
+## Customer email without double sends or leaked staff notes
+
+**Problem.** Customers get an email on key status changes. A retry, a duplicate enqueue or the
+provider's own retry must never produce two emails, staff-only notes must never reach a customer,
+and an unsubscribe must hold even for an email already queued.
+
+**Approach.** The message is rendered and stored inside the status change's transaction, so staff see
+exactly what the customer got and a rolled-back change sends nothing. The template's input type has
+no internal-note field, so a caller cannot leak one by accident. Each email has an idempotency key
+derived from the history event id (unique index, and sent to Resend as `Idempotency-Key`), so every
+retry is the same email. Opt-outs are per organization and address and are checked at queue time and
+again at send time. Unsubscribe links carry an HMAC-signed token, and the link opens a confirm page
+whose button posts, so mail scanners that follow links cannot unsubscribe anyone.
+
+**Without a key, and in the demo.** Without Resend credentials, and always in demo mode, messages go
+to a stored preview that admins can read, so the whole flow is demonstrable without sending real
+email to addresses visitors typed.

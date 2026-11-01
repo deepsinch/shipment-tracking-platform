@@ -27,7 +27,7 @@ test("an admin creates an API key, an integration lists shipments with it, and r
   const secret = (await page.getByTestId("new-api-key").textContent())!.trim();
   expect(secret).toMatch(/^wb_live_[A-Za-z0-9_-]{43}$/);
   await expect(page.getByRole("button", { name: "Copy key" })).toBeVisible();
-  const row = page.getByTestId("api-key-row");
+  const row = page.locator(`[data-testid="api-key-row"]:visible`);
   await expect(row).toContainText("ERP integration");
   await expect(row).toContainText(`${secret.slice(0, 12)}…`);
   await expect(row).not.toContainText(secret);
@@ -54,7 +54,7 @@ test("an admin creates an API key, an integration lists shipments with it, and r
   // The secret is gone after a reload, and "last used" has been recorded.
   await page.reload();
   await expect(page.getByTestId("new-api-key")).toHaveCount(0);
-  await expect(page.getByTestId("api-key-row")).not.toContainText("Never");
+  await expect(page.locator(`[data-testid="api-key-row"]:visible`)).not.toContainText("Never");
 
   // Revoking asks first, and takes effect at once.
   await page.getByRole("button", { name: "Revoke key ERP integration" }).click();
@@ -63,7 +63,7 @@ test("an admin creates an API key, an integration lists shipments with it, and r
 
   await page.getByRole("button", { name: "Revoke key ERP integration" }).click();
   await page.getByRole("button", { name: "Revoke key", exact: true }).click();
-  await expect(page.getByTestId("api-key-row")).toContainText("Revoked");
+  await expect(page.locator(`[data-testid="api-key-row"]:visible`)).toContainText("Revoked");
   const revoked = await request.get("/api/v1/shipments", { headers });
   expect(revoked.status()).toBe(401);
 });

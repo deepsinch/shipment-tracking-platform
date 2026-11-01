@@ -49,7 +49,8 @@ src/
 - Maps (MapLibre) are client-only and supplementary: every map has a text equivalent that keyboard
   and screen-reader users can use, and the public page never shows a map or coordinates.
 - E2E specs (never run with `E2E_MAP_TILES=live` in CI) import `test` from `tests/e2e/fixtures.ts` (map tiles blocked, no network dependency);
-  contexts a spec creates itself call `blockMapTiles`.
+  contexts a spec creates itself call `blockMapTiles`. Next keeps a hidden copy of the previous page after
+  navigation or reload, so locate repeated test ids with `:visible` (strict mode otherwise sees two).
 - Anything with history (users, organizations, shipments) is deactivated, never hard-deleted: foreign keys
   to history are `restrict`.
 - Migrations run during deploy while the previous release may still serve traffic, so every
