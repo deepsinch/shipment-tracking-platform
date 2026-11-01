@@ -132,7 +132,8 @@ src/
   git config committer.email "noreply@anthropic.com"
   ```
   Check with `git log -1 --format='%an <%ae> / %cn <%ce> / sig:%G?'` after the first commit.
-- Every commit message ends with these two trailer lines (the session URL changes per session; use the current one):
+- Every commit message ends with these two trailer lines. Name the model that actually wrote the commit
+  (the implementor's model for its commits, e.g. `Claude Sonnet 5.5`), and use the current session URL:
   ```
   Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
   Claude-Session: https://claude.ai/code/<current session id>
@@ -146,6 +147,9 @@ src/
   `pnpm test` needs both: its integration project wipes and re-migrates the `*_test` database.
 - Three databases: `waybill` (dev), `waybill_test` (integration, wiped every run, name must end in `_test`)
   and `waybill_e2e` (`E2E_DATABASE_URL`, wiped by `test:e2e`, name must end in `_e2e`, created on first run).
+  Demo mode adds `<test db>_demo_test` (reset and tick integration tests) and `waybill_demo_e2e` (the
+  demo e2e server), both created on first use. Hosted resets only wipe databases listed in
+  `DEMO_RESET_DATABASES`.
 - Playwright: use the preinstalled chromium at `/opt/pw-browsers/chromium`
   (via `launchOptions.executablePath`). Never run `playwright install`.
 - Docker is unavailable.
