@@ -86,7 +86,7 @@ Each checkpoint green and reviewed, like Phase 2. Suggested order (later ones bu
    `If-Match` required on status changes (`412` / `428`), a hand-written OpenAPI 3.1 document at
    `/api/v1/openapi.json`, and `docs/api.md`. Design and decisions 53 to 57 in
    `docs/architecture.md`.
-2. **Signed, retried webhooks.** Endpoints per organization (URL, secret, event types), an outbox
+2. **[done] Signed, retried webhooks.** Endpoints per organization (URL, secret, event types), an outbox
    table written in the same transaction as the change (like `pg_notify` today), a delivery worker
    with exponential backoff and a dead-letter state, HMAC-SHA256 signatures with a timestamp
    (replay window), a delivery log in the UI with "resend". Decide where the worker runs (Vercel Cron
@@ -792,6 +792,46 @@ import.meta.url).href)` makes Turbopack emit the worker to `/_next/static/media/
   Live map, is desktop-only; the page itself works at 390px.
 - **Not done on purpose:** no CORS (server-to-server API), no key rotation or expiry, no per-key
   event attribution, no audit log of key use beyond `last_used_at` (minute granularity).
+
+### Signed, retried webhooks (Phase 3, checkpoint 2)
+
+Design in `docs/architecture.md` ("Webhooks without a long-running worker", "As built (checkpoint 2)"),
+decisions 58 to 62; receivers' guide in `docs/api.md` ("Webhooks").
+
+- **Where things are.** Pure: `src/domain/{ip-address,webhook-url,webhook-signature,webhooks}.ts`.
+  I/O: `src/server/webhooks/` (`destination.ts` SSRF guard, `transport.ts` pinned POST, `payloads.ts`,
+  `drain-throttle.ts`, `schedule.ts` the two `after()` hooks) and `src/server/services/webhook-{outbox,delivery,endpoints}.ts`.
+  UI: `/dashboard/settings/webhooks`.
+- **Services must enqueue inside their transaction** (`enqueueShipmentCreated` and friends, next to
+  `announceShipmentChange`). A new write path that changes what an event says needs the same call.
+- **Never `await` a delivery in a request.** Use `deliverWebhooksAfterResponse()` after a change and
+  `drainWebhooksOnActivity()` for the throttled heartbeat. They are no-ops outside a Next request
+  scope (the helper swallows the "outside a request scope" error), so tests and CLI scripts leave
+  rows queued; the simulator script and the seed therefore do not deliver webhooks.
+- **A drain claims every due row in the database.** Integration tests that count deliveries park the
+  other open rows first (`beforeEach` in `webhook-delivery.integration.test.ts`); test endpoints use a
+  `.invalid` URL by default (`tests/integration/webhooks.ts`) so a stray drain never leaves the machine.
+  Tests pass `policy` / `resolve` / `transport` through `DeliveryDeps` instead of touching env.
+- **Local receivers:** tests and the e2e spec use `127.0.0.1` URLs. The e2e server runs with
+  `WEBHOOKS_ALLOW_LOCAL_TARGETS=true` (set in `playwright.config.ts` for the main server only);
+  `createEnv` refuses the flag when `VERCEL` is set or demo mode is on. `localhost` as a name may
+  resolve to `::1` first on some machines; use the literal in tests.
+- **A CHECK with `IN (...)` is NULL-valued for a NULL column**, and a CHECK passes on NULL. The first
+  version of `webhook_endpoints_disabled_reason_matches` let `enabled = false` with no reason through;
+  the schema test caught it (`IS NOT NULL` was added). Check the NULL case of every such constraint.
+- **Zod list errors are keyed `eventTypes.2`.** `validationFailure(error, { "eventTypes.": "eventTypes" })`
+  folds them onto the one field the form shows. The save-time URL check also runs when another field
+  failed, so one submit reports every problem.
+- **Proven red:** without the outbox call inside the transaction the rollback test fails; without
+  `SKIP LOCKED` the forced race blocks (and "many concurrent drains" hangs); without the lease the
+  mid-request drain sends the delivery twice; with the address check disabled all six SSRF tests fail;
+  without the membership join four API-key tests fail.
+- **Mobile navigation:** like API keys, the Webhooks link is in the desktop header only; the page
+  works at 390 px (checked, no horizontal scroll).
+- **Known gaps:** no retention job for old deliveries (rows are kept; add to the daily purge when the
+  log grows); a retry waits for activity or the daily cron, so on a quiet Hobby deployment a 1-minute
+  retry may happen hours later (documented in `docs/api.md`); the delivery log does not update live
+  (reload to see results).
 
 ### Testing
 

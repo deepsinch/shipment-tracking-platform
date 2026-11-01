@@ -38,7 +38,10 @@ Tick these off as you go. Each item is explained in the numbered steps below.
   version keeps serving.
 - A daily cron job (03:00 UTC) wipes and recreates the demo data, so the demo never fills up with
   strangers' test data. A second daily job (04:00 UTC, `/api/cron/purge`, same `CRON_SECRET`) deletes
-  location pings older than 30 days and expired rate-limit rows; it also runs with demo mode off.
+  location pings older than 30 days and expired rate-limit rows, and drains any webhook deliveries
+  that are due (the backstop for retries that no app or API activity picked up); it also runs with
+  demo mode off. Webhooks add no cron entry and no environment variable: `WEBHOOKS_ALLOW_LOCAL_TARGETS`
+  is for development and tests only, and the app refuses to start with it on Vercel.
 - While someone has the live map or a shipment page open, the browser asks the server to move the
   demo trucks one step every ~12 seconds. Nothing runs when nobody is looking. When fewer than 6
   shipments are left to drive, the same tick books up to 2 new ones as the demo dispatcher, so the

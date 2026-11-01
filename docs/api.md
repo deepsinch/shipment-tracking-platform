@@ -109,7 +109,127 @@ Switch on `type`; `title` and `detail` are for people.
 Fixed one-minute windows: 120 requests per key, 30 requests with an invalid key per client address,
 and 60 public tracking lookups per client address. Over the limit you get `429` with `Retry-After`.
 
+## Webhooks
+
+Webhooks send an HTTPS `POST` to your URL when something happens, so you do not have to poll. An
+admin adds one under **Webhooks** in the dashboard (`/dashboard/settings/webhooks`): the URL and the
+events it wants. The signing secret (`whsec_` plus 43 characters) is shown once; lose it and you
+rotate it there (the old one stops signing at once).
+
+### Events
+
+| `type`                     | When                                      | `data` besides `shipment` and `version`                                    |
+| -------------------------- | ----------------------------------------- | -------------------------------------------------------------------------- |
+| `shipment.created`         | A shipment was booked (dashboard or API)  | none                                                                       |
+| `shipment.status_changed`  | A shipment moved to a new status          | `change`: `fromStatus`, `toStatus`, `occurredAt`, `location`, `publicNote` |
+| `shipment.driver_assigned` | A driver was assigned, changed or removed | `assignment`: `fromDriverName`, `toDriverName`                             |
+
+```json
+{
+  "id": "0b6f7a52-4c63-4c0e-9d0b-2f1f6c1c8a10",
+  "type": "shipment.status_changed",
+  "createdAt": "2026-03-01T10:00:00.000Z",
+  "data": {
+    "version": 2,
+    "shipment": {
+      "id": "...",
+      "trackingCode": "WB-ABCD-1234",
+      "status": "picked_up",
+      "...": "..."
+    },
+    "change": {
+      "fromStatus": "created",
+      "toStatus": "picked_up",
+      "occurredAt": "2026-03-01T10:00:00.000Z",
+      "location": { "city": "Rotterdam", "lat": null, "lng": null },
+      "publicNote": "Collected"
+    }
+  }
+}
+```
+
+`data.shipment` is exactly what `GET /shipments/{id}` returns for the shipment (without its
+history). As in the API, no user or organization ids are sent; drivers appear by display name.
+Internal notes are never sent. `data.version` is the shipment's `ETag` number, so you can ignore a
+delivery older than one you have already processed.
+
+### Delivery
+
+Each request has these headers:
+
+| Header              | Value                                                         |
+| ------------------- | ------------------------------------------------------------- |
+| `Waybill-Event`     | The event type, e.g. `shipment.status_changed`                |
+| `Waybill-Delivery`  | The delivery's id (a retry keeps it; a resend gets a new one) |
+| `Waybill-Signature` | `t=<unix seconds>,v1=<hex HMAC-SHA256>`                       |
+| `Content-Type`      | `application/json`                                            |
+
+- **Success is any `2xx`**, within 5 seconds. Answer fast and do the work afterwards. Redirects are
+  **not followed** (a `3xx` counts as a failure), and only the status code is read from your answer.
+- **Retries:** after a failure Waybill tries again after 1 minute, 5 minutes, 30 minutes, 2 hours and
+  6 hours, then gives up (six attempts in about nine hours; each retry needs some activity in the
+  app or the daily job to run it, so a retry can be later than scheduled, never earlier). Five
+  deliveries in a row that gave up switch the webhook off; an admin enables it again.
+- **At least once.** A delivery can arrive twice (your `2xx` was lost, or an admin pressed Resend).
+  Deduplicate on the event `id`: every delivery of one event, retries and resends included, carries
+  the same one.
+- **Order is not guaranteed.** Use `data.version` to ignore stale shipments.
+- The URL must be `https` and resolve to a public address. Addresses in private, loopback,
+  link-local, shared (CGNAT), multicast and cloud-metadata ranges are refused at every delivery, not
+  only when you save the URL.
+
+### Verifying the signature
+
+Sign-check every request before trusting it. The signature covers the timestamp and the **raw body**
+(the exact bytes, before any JSON parsing), keyed with the webhook's secret:
+
+```
+signed payload = "<t>.<raw body>"
+v1             = hex( HMAC-SHA256( secret, signed payload ) )
+```
+
+Reject the request if the signature does not match, or if `t` is more than **5 minutes** from your
+clock (a replay of an old delivery). A Node.js receiver (Express shown; the point is `express.raw`,
+so the body is not parsed first):
+
+```js
+import crypto from "node:crypto";
+import express from "express";
+
+const SECRET = process.env.WAYBILL_WEBHOOK_SECRET; // "whsec_..."
+const TOLERANCE_SECONDS = 5 * 60;
+
+function verify(header, rawBody) {
+  const parts = Object.fromEntries(header.split(",").map((part) => part.split("=")));
+  const t = Number(parts.t);
+  if (!Number.isInteger(t) || !parts.v1) return false;
+  if (Math.abs(Date.now() / 1000 - t) > TOLERANCE_SECONDS) return false;
+
+  const expected = crypto.createHmac("sha256", SECRET).update(`${t}.${rawBody}`).digest();
+  const received = Buffer.from(parts.v1, "hex");
+  return received.length === expected.length && crypto.timingSafeEqual(received, expected);
+}
+
+const app = express();
+app.post("/waybill", express.raw({ type: "application/json" }), (req, res) => {
+  const body = req.body.toString("utf8");
+  if (!verify(req.get("Waybill-Signature") ?? "", body)) return res.sendStatus(400);
+
+  const event = JSON.parse(body);
+  // Deduplicate on event.id, then handle event.type...
+  res.sendStatus(204);
+});
+```
+
+While you rotate a secret, accept both the old and the new one for a short time on your side.
+
+### Testing a webhook
+
+Use a tunnel such as `ngrok http 3000` to get a public `https` URL for a local receiver. Add it,
+change a shipment's status, and look at the **Latest deliveries** list: each row shows the attempt
+count, the last HTTP status or error, and **Resend** for finished deliveries.
+
 ## Not in the API
 
-Assigning drivers, live positions and managing keys are dashboard-only. The API has no CORS headers:
+Assigning drivers, live positions and managing keys and webhooks are dashboard-only. The API has no CORS headers:
 call it from servers, not from browsers.
