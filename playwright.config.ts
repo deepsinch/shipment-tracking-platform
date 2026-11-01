@@ -32,7 +32,8 @@ export default defineConfig({
   testDir: "tests/e2e",
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,
-  reporter: process.env.CI ? "github" : "list",
+  // In CI: annotations on the pull request, plus an HTML report uploaded when the job fails.
+  reporter: process.env.CI ? [["github"], ["html", { open: "never" }]] : "list",
   use: {
     baseURL,
     trace: "retain-on-failure",

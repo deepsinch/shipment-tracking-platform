@@ -1,0 +1,120 @@
+# Verifies every push and pull request: the same six checks as a checkpoint's done criteria.
+# CI only verifies; deploys come from Vercel's Git integration (docs/architecture.md, Phase 4a).
+#
+# Actions are pinned to major tags of first-party (actions/*) and well-known (pnpm/*) actions:
+# they receive fixes without churn, and this job holds no secrets and only read access, so a
+# compromised tag could not push or leak deploy credentials. Pin to full SHAs (with Dependabot to
+# bump them) if the workflow ever gains secrets or write permissions.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+# A newer push to the same branch or pull request cancels the run it supersedes.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: format, lint, typecheck, test, build, e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      CI: true
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # Version from "packageManager" in package.json.
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Format
+        run: pnpm format:check
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      # Before any environment exists on purpose: importing app modules must not need env vars,
+      # so a production build works without a database or secrets.
+      - name: Build without environment
+        run: pnpm build
+
+      # Mirrors .env.example: the role may create databases, so test:e2e creates waybill_e2e.
+      - name: Create database role and databases
+        env:
+          PGHOST: localhost
+          PGUSER: postgres
+          PGPASSWORD: postgres
+        run: |
+          psql -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE ROLE waybill WITH LOGIN PASSWORD 'waybill' CREATEDB;
+          CREATE DATABASE waybill OWNER waybill;
+          CREATE DATABASE waybill_test OWNER waybill;
+          SQL
+
+      # Vitest, Playwright and the e2e build all read .env. The auth secret is a throwaway made
+      # for this run only.
+      - name: Write .env
+        run: |
+          secret="$(openssl rand -base64 32)"
+          echo "::add-mask::$secret"
+          cat > .env <<ENV
+          DATABASE_URL=postgres://waybill:waybill@localhost:5432/waybill
+          TEST_DATABASE_URL=postgres://waybill:waybill@localhost:5432/waybill_test
+          E2E_DATABASE_URL=postgres://waybill:waybill@localhost:5432/waybill_e2e
+          BETTER_AUTH_SECRET=$secret
+          BETTER_AUTH_URL=http://localhost:3000
+          ENV
+
+      - name: Unit and integration tests
+        run: pnpm test
+
+      # Playwright's own Chromium (the config falls back to it when the preinstalled browser of
+      # the development container is absent).
+      - name: Install Playwright Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: End-to-end tests
+        run: pnpm test:e2e
+
+      - name: Upload Playwright report and traces
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: ignore
+          retention-days: 14
