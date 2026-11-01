@@ -13,6 +13,11 @@ const nextConfig: NextConfig = {
       },
     },
   },
+  // The nightly demo reset applies the committed migrations at runtime. The SQL files are read from
+  // disk, not imported, so the function's trace would not include them without this.
+  outputFileTracingIncludes: {
+    "/api/cron/reset-demo": ["./src/server/db/migrations/**/*"],
+  },
   // Security headers on every response, pages, API routes and static files alike. The policy and
   // its tradeoffs are documented in src/lib/security-headers.ts. Vercel adds HSTS.
   async headers() {
