@@ -48,6 +48,11 @@ export type AssignDriverResult =
   | NotFound
   | ValidationFailure;
 
+export type AssignDriverDeps = {
+  /** The event time. Injectable so tests and the demo seed control it. */
+  now?: () => Date;
+};
+
 /**
  * Assigns a shipment to a driver, moves it to another driver, or unassigns it (`driverId: null`).
  * Admins and dispatchers only; the driver must be a `driver` member of the caller's organization.
@@ -58,7 +63,11 @@ export type AssignDriverResult =
  * event (internal history, old and new driver ids in `metadata`) is written in the same
  * transaction.
  */
-export async function assignDriver(ctx: AuthContext, input: unknown): Promise<AssignDriverResult> {
+export async function assignDriver(
+  ctx: AuthContext,
+  input: unknown,
+  deps: AssignDriverDeps = {},
+): Promise<AssignDriverResult> {
   // Reveals nothing about any shipment: drivers may never assign, whatever the id.
   if (!canAssignDrivers(ctx.role)) return forbidden;
 
@@ -135,7 +144,7 @@ export async function assignDriver(ctx: AuthContext, input: unknown): Promise<As
         organizationId: ctx.organizationId,
         shipmentId,
         type: "driver_assigned",
-        occurredAt: new Date(),
+        occurredAt: deps.now?.() ?? new Date(),
         actorUserId: ctx.userId,
         metadata,
       })
