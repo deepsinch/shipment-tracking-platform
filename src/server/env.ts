@@ -2,12 +2,14 @@ import "server-only";
 
 import { z } from "zod";
 
+import { selectEmailTransport } from "@/domain/email";
+
 import { resolveAuthUrls, type AuthUrlSource } from "./auth/base-url";
 
 /**
  * Runtime environment for the app, validated with Zod.
  *
- * Validation is lazy: each group (database, auth, realtime, demo, webhooks) is parsed the first time code
+ * Validation is lazy: each group (database, auth, realtime, demo, webhooks, email) is parsed the first time code
  * reads it, and cached. Importing this module never throws, so `next build` and modules that are
  * only imported (never run) work without any environment variables. A missing or malformed
  * variable fails the first request that needs it, with a message naming the variable (never its
@@ -202,12 +204,48 @@ const webhooksSchema = z
     allowLocalTargets: env.WEBHOOKS_ALLOW_LOCAL_TARGETS === "true",
   }));
 
+const emailSchema = z
+  .object({
+    RESEND_API_KEY: optionalString,
+    EMAIL_FROM: optionalString,
+    // Read to force the preview transport in demo mode.
+    DEMO_MODE: optionalString,
+  })
+  .superRefine((env, ctx) => {
+    if (env.DEMO_MODE === "true") return;
+    if (env.RESEND_API_KEY && !env.EMAIL_FROM) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["EMAIL_FROM"],
+        message:
+          'is required when RESEND_API_KEY is set, e.g. "Waybill <notifications@your-domain>"',
+      });
+    } else if (env.EMAIL_FROM && !env.RESEND_API_KEY) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["RESEND_API_KEY"],
+        message: "is required when EMAIL_FROM is set",
+      });
+    }
+  })
+  .transform((env) => ({
+    resendApiKey: env.RESEND_API_KEY,
+    from: env.EMAIL_FROM,
+    /** `resend` only with both variables and demo mode off; otherwise messages are stored as previews. */
+    transport: selectEmailTransport({
+      demoMode: env.DEMO_MODE === "true",
+      resendApiKey: env.RESEND_API_KEY,
+      from: env.EMAIL_FROM,
+    }),
+  }));
+
 const groups = {
   database: databaseSchema,
   auth: authSchema,
   realtime: realtimeSchema,
   demo: demoSchema,
   webhooks: webhooksSchema,
+  email: emailSchema,
 };
 
 type Groups = typeof groups;
@@ -247,6 +285,7 @@ export function createEnv(source: Source): ServerEnv {
     realtime: { get: lazy("realtime"), enumerable: true },
     demo: { get: lazy("demo"), enumerable: true },
     webhooks: { get: lazy("webhooks"), enumerable: true },
+    email: { get: lazy("email"), enumerable: true },
   });
 }
 

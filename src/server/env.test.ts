@@ -242,6 +242,45 @@ describe("webhooks", () => {
   });
 });
 
+describe("email", () => {
+  const KEYS = { RESEND_API_KEY: "re_123", EMAIL_FROM: "Waybill <hi@example.com>" };
+
+  it("previews messages without any configuration", () => {
+    expect(createEnv({}).email).toEqual({
+      resendApiKey: undefined,
+      from: undefined,
+      transport: "preview",
+    });
+    expect(createEnv({ RESEND_API_KEY: "", EMAIL_FROM: "" }).email.transport).toBe("preview");
+  });
+
+  it("sends through Resend with both variables", () => {
+    expect(createEnv(KEYS).email).toMatchObject({ transport: "resend", from: KEYS.EMAIL_FROM });
+  });
+
+  it("insists on both variables together", () => {
+    expect(() => createEnv({ RESEND_API_KEY: "re_123" }).email).toThrow(
+      /EMAIL_FROM is required when RESEND_API_KEY is set/,
+    );
+    expect(() => createEnv({ EMAIL_FROM: "a@b.c" }).email).toThrow(
+      /RESEND_API_KEY is required when EMAIL_FROM is set/,
+    );
+  });
+
+  it("never sends in demo mode, and does not complain about leftover settings", () => {
+    expect(createEnv({ ...KEYS, DEMO_MODE: "true" }).email.transport).toBe("preview");
+    expect(createEnv({ RESEND_API_KEY: "re_123", DEMO_MODE: "true" }).email.transport).toBe(
+      "preview",
+    );
+  });
+
+  it("does not echo the API key when it is rejected", () => {
+    expect(() => createEnv({ RESEND_API_KEY: "re_secret_value" }).email).not.toThrow(
+      /re_secret_value/,
+    );
+  });
+});
+
 describe("validateEnv", () => {
   it("returns every group for a valid environment", () => {
     const env = validateEnv(valid);
