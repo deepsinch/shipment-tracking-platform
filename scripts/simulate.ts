@@ -23,19 +23,16 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { parseArgs } from "node:util";
 
 import { config as loadEnv } from "dotenv";
-import { eq } from "drizzle-orm";
 
+import { DEMO_ORGANIZATION_NAME } from "@/domain/demo";
 import { PING_INTERVAL_MS } from "@/domain/location-sharing";
 import { createRandom } from "@/lib/random";
-import { resolveAuthContext, type AuthContext } from "@/server/auth/auth-context";
-import { closeDb, getDb } from "@/server/db/client";
+import { closeDb } from "@/server/db/client";
 import { assertDatabaseName } from "@/server/db/maintenance";
-import { member, user } from "@/server/db/schema";
+import { resolveDemoDrivers } from "@/server/demo/fleet";
 import { closeRealtimeBus } from "@/server/realtime";
-import { DEMO_ORGANIZATION_NAME, DEMO_USERS } from "@/server/seed/demo-seed";
 import { createSimulator } from "@/server/simulator/simulator";
 import { DEFAULT_SIMULATOR_CONFIG } from "@/server/simulator/truck";
-import { listDrivers } from "@/server/services/list-drivers";
 
 loadEnv({ quiet: true });
 
@@ -77,35 +74,6 @@ function parseOptions() {
   };
 }
 
-/** The demo organization's drivers, as the AuthContext each would get from a session. */
-async function demoDrivers(): Promise<AuthContext[]> {
-  const admin = DEMO_USERS[0];
-  const [row] = await getDb()
-    .select({ userId: user.id, organizationId: member.organizationId })
-    .from(user)
-    .innerJoin(member, eq(member.userId, user.id))
-    .where(eq(user.email, admin.email))
-    .limit(1);
-  if (!row)
-    throw new Error(`${DEMO_ORGANIZATION_NAME} is not seeded yet. Run \`pnpm db:seed\` first.`);
-
-  const adminContext = await resolveAuthContext({
-    userId: row.userId,
-    activeOrganizationId: row.organizationId,
-  });
-  if (!adminContext)
-    throw new Error(`${admin.email} is no longer a member of ${DEMO_ORGANIZATION_NAME}.`);
-  const drivers = await listDrivers(adminContext);
-  if (!drivers.ok) throw new Error(`${admin.email} may not list drivers.`);
-
-  const contexts = await Promise.all(
-    drivers.drivers.map((driver) =>
-      resolveAuthContext({ userId: driver.id, activeOrganizationId: row.organizationId }),
-    ),
-  );
-  return contexts.filter((context) => context !== null);
-}
-
 async function main(): Promise<void> {
   const url = process.env.DATABASE_URL;
   if (!url) throw new Error("DATABASE_URL is not set. Copy .env.example to .env (see README).");
@@ -123,7 +91,7 @@ async function main(): Promise<void> {
     stop.abort();
   });
 
-  const drivers = await demoDrivers();
+  const drivers = await resolveDemoDrivers();
   const simulator = createSimulator({
     drivers,
     random: createRandom(options.seed),

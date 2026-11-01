@@ -2,6 +2,7 @@ import "server-only";
 
 import { eq } from "drizzle-orm";
 
+import { DEMO_ORGANIZATION_NAME, DEMO_PASSWORD, DEMO_USERS, type DemoUser } from "@/domain/demo";
 import type { Role } from "@/domain/roles";
 import { measureRoute, pointAlong } from "@/lib/route-geometry";
 import type { AuthContext } from "@/server/auth/auth-context";
@@ -28,15 +29,7 @@ import { draftDemoShipments, type DraftShipment } from "./demo-data";
  * tries to "refresh" rows. `pnpm db:seed --reset` wipes the local dev database first instead.
  */
 
-export const DEMO_ORGANIZATION_NAME = "Demo Freight Co";
-/** Demo-only credentials, published in the README. */
-export const DEMO_PASSWORD = "demo-password";
-
-export const DEMO_USERS = [
-  { role: "admin", name: "Alex Admin", email: "admin@demo.test" },
-  { role: "dispatcher", name: "Dana Dispatcher", email: "dispatcher@demo.test" },
-  { role: "driver", name: "Dries Driver", email: "driver@demo.test" },
-] as const satisfies readonly { role: Role; name: string; email: string }[];
+export { DEMO_ORGANIZATION_NAME, DEMO_PASSWORD, DEMO_USERS };
 
 export type SeedResult =
   | { status: "seeded"; organizationId: string; shipmentCount: number }
@@ -73,7 +66,7 @@ async function createDemoAccounts(): Promise<Record<Role, AuthContext>> {
   const { organizationId } = signUp;
 
   const auth = getAuth();
-  const member = async (account: (typeof DEMO_USERS)[number]): Promise<AuthContext> => {
+  const member = async (account: DemoUser): Promise<AuthContext> => {
     const { user: created } = await auth.api.signUpEmail({
       body: { name: account.name, email: account.email, password: DEMO_PASSWORD },
     });

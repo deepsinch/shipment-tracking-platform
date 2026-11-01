@@ -40,8 +40,12 @@ import {
  */
 
 export type SimulatorOptions = {
-  /** The drivers to drive as. Their assigned, unfinished shipments are the trucks. */
-  drivers: readonly AuthContext[];
+  /**
+   * The drivers to drive as. Their assigned, unfinished shipments are the trucks. A function is
+   * called at the start of every tick, for a caller whose drivers can change between ticks (the
+   * hosted demo is recreated every night).
+   */
+  drivers: readonly AuthContext[] | (() => Promise<readonly AuthContext[]>);
   random: Random;
   config?: Partial<SimulatorConfig>;
   /** At most this many trucks per tick (the first by tracking code). */
@@ -107,7 +111,9 @@ export function createSimulator(options: SimulatorOptions) {
 
   async function tick(): Promise<TickReport> {
     const now = clock();
-    const trucks = await loadTrucks(options.drivers);
+    const drivers =
+      typeof options.drivers === "function" ? await options.drivers() : options.drivers;
+    const trucks = await loadTrucks(drivers);
     const candidates: Truck[] = [];
     for (const truck of trucks) {
       if (drivable(truck)) candidates.push(truck);
