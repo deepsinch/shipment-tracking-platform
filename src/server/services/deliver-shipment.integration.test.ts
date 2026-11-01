@@ -536,10 +536,12 @@ describe("deliverShipment", () => {
       const rows = await getDb()
         .select()
         .from(webhookDeliveries)
-        .where(eq(webhookDeliveries.eventType, "shipment.status_changed"));
+        // This organization's only: other tests' rows may hold payloads of any shape.
+        .where(eq(webhookDeliveries.organizationId, orgId));
       const mine = rows.find(
         (row) =>
-          (row.payload as { data: { shipment: { id: string } } }).data.shipment.id === shipment.id,
+          (row.payload as { data?: { shipment?: { id: string } } }).data?.shipment?.id ===
+          shipment.id,
       )!;
       const { data } = mine.payload as { data: { change: Record<string, unknown> } };
 
