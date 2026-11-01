@@ -45,6 +45,8 @@ describe("the Vercel Blob adapter", () => {
       addRandomSuffix: false,
       allowOverwrite: false,
     });
+    // An upload that hangs is abandoned, not waited for.
+    expect(options.abortSignal).toBeInstanceOf(AbortSignal);
   });
 
   it("reads privately and hands back the stream and type", async () => {

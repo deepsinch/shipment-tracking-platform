@@ -1,6 +1,5 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
 import { notFound } from "next/navigation";
 
 import type { ActionOutcome } from "@/components/action-message";
@@ -10,6 +9,8 @@ import { requireAuthContext } from "@/server/auth/session";
 import { changeShipmentStatus } from "@/server/services/change-shipment-status";
 import type { FieldErrors } from "@/server/services/results";
 import { deliverOutboxAfterResponse } from "@/server/webhooks/schedule";
+
+import { revalidateShipment } from "./revalidate-shipment";
 
 /**
  * The status change action, shared by the dashboard's detail page and the driver app. The service
@@ -88,6 +89,15 @@ export async function changeStatusAction(
       };
     case "validation": {
       const { "location.city": locationCity, ...fieldErrors } = result.fieldErrors;
+      // Only a hand-made request gets here: the driver app delivers through its own form.
+      if (fieldErrors.recipientName) {
+        return {
+          outcome: "error",
+          title: "A delivery needs the recipient's name",
+          message: "Use the delivery form in the driver app, which asks for it.",
+          values,
+        };
+      }
       return {
         outcome: "error",
         title: "Please correct the highlighted fields.",
@@ -98,12 +108,4 @@ export async function changeStatusAction(
     case "not_found":
       notFound();
   }
-}
-
-/** Both surfaces show the shipment; revalidating a path the caller cannot open is harmless. */
-function revalidateShipment(id: string): void {
-  revalidatePath(`/dashboard/shipments/${id}`);
-  revalidatePath("/dashboard/shipments");
-  revalidatePath(`/driver/shipments/${id}`);
-  revalidatePath("/driver");
 }

@@ -92,6 +92,8 @@ export default async function DriverShipmentPage({ params }: PageProps<"/driver/
             version={shipment.version}
             status={shipment.status}
             options={statusOptionsFor(ctx.role, shipment.status)}
+            recipientName={shipment.recipientName}
+            photosEnabled={env.photos.enabled}
           />
         </CardContent>
       </Card>

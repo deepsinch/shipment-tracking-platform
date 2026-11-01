@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 320" role="img" aria-labelledby="t">
+  <title id="t">A sample delivery photo: a parcel on a doorstep</title>
+  <rect width="480" height="320" fill="#d9e2ec"/>
+  <rect y="230" width="480" height="90" fill="#9fb3c8"/>
+  <rect x="60" y="30" width="150" height="200" rx="4" fill="#486581"/>
+  <rect x="78" y="48" width="114" height="164" rx="2" fill="#627d98"/>
+  <circle cx="180" cy="135" r="6" fill="#d9e2ec"/>
+  <rect x="250" y="150" width="170" height="110" fill="#c99a5b"/>
+  <rect x="250" y="150" width="170" height="22" fill="#b38546"/>
+  <rect x="323" y="150" width="24" height="110" fill="#e3c590"/>
+  <rect x="268" y="200" width="46" height="26" fill="#f0f4f8"/>
+  <path d="M274 208h34M274 216h24" stroke="#627d98" stroke-width="3" stroke-linecap="round"/>
+  <text x="240" y="300" text-anchor="middle" font-family="sans-serif" font-size="16" fill="#243b53">Sample photo</text>
+</svg>

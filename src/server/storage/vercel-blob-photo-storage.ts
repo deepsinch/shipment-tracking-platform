@@ -11,6 +11,13 @@ import type { PhotoStorage } from "./photo-storage";
  * The SDK is checked against @vercel/blob 2.8 (`put`, `get`, `del` with `access`). Not exercised
  * against the real service from CI: the unit test pins the arguments with a mocked SDK.
  */
+/**
+ * How long a photo upload may take before the delivery gives up on it ("the photo could not be
+ * saved", nothing delivered). The SDK retries on its own, which on a bad connection to the store
+ * would leave the driver looking at "Delivering…" for minutes.
+ */
+export const UPLOAD_TIMEOUT_MS = 20_000;
+
 export function createVercelBlobPhotoStorage(token: string): PhotoStorage {
   return {
     async put(key, bytes, contentType) {
@@ -21,6 +28,7 @@ export function createVercelBlobPhotoStorage(token: string): PhotoStorage {
         // The key already ends in a random id, and a photo is never replaced.
         addRandomSuffix: false,
         allowOverwrite: false,
+        abortSignal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
       });
     },
     async get(key) {
