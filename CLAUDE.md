@@ -67,6 +67,10 @@ src/
   setup may read their own).
 - Any new external origin (API, CDN, tiles) is added to `src/lib/security-headers.ts`; the CSP e2e
   spec fails on violations. `dangerouslySetInnerHTML` is banned by lint (part of the CSP tradeoff).
+- Public API: route files under `src/app/api/v1` export handlers only, built with `apiRoute(scope, ...)`;
+  shared API code lives in `src/server/api/`. Errors are problem+json from service result kinds; the
+  OpenAPI document is tied to routes and projections by tests. API tests give each call a random
+  `x-forwarded-for` so per-IP limits do not leak between tests.
 - Importing a module must not require environment variables (e.g. the DB pool is created lazily), so
   `next build` works without a database.
 

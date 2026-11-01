@@ -358,3 +358,24 @@ stuck forever.
 - **Chosen:** read ownership from the append-only history each tick. If the truck's driver
   recorded the exception, the driver clears it; otherwise it waits for the office. It mirrors real
   ownership, survives restarts and needs no new state.
+
+## A public API on top of services built for sessions
+
+**Problem.** Every service takes an `AuthContext` built from a signed-in member. An API key has no
+member behind it, yet it must obey exactly the same rules (tenant scope, status rules, concurrency)
+without a fake role leaking into the auth library or the UI.
+
+**Approach.** A widened `ActorRole` (`member roles | "api"`) on `AuthContext`, and a narrower
+`MemberAuthContext` for everything session-based. The compiler forces every permission function and
+its test to decide what `api` may do (a dispatcher's permissions). Keys are 32 random bytes shown
+once; only a SHA-256 hash is stored and looked up through a unique index, so the secret is never
+compared and needs no constant-time check.
+
+**Concurrency over HTTP.** `ETag` is the shipment version, and status changes require `If-Match`:
+`428` without it, `412` with the current ETag when it is stale. It is the same lost-update guarantee
+the dashboard forms have, proven with the same forced-race test over real HTTP: exactly one request
+gets `200`, the other `412`, and one history event is written.
+
+**Options rejected.** Adding `api` as a member role (it would become assignable in the UI); a
+parallel permission model for keys (two sets of rules that drift). The OpenAPI document is
+hand-written, with tests tying it to the route files and response projections so it cannot drift.

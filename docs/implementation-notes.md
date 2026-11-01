@@ -911,6 +911,10 @@ import.meta.url).href)` makes Turbopack emit the worker to `/_next/static/media/
   so the simulator integration test starts its clock an hour in the past. Add `deps.now` (as in
   `createShipment` and `recordLocationPing`) early in Phase 3.
 
+- **API keys outlive their creator's membership.** A key acts as its organization and attributes
+  events to the admin who created it; if that admin is removed, the key keeps working. Fix: revoke
+  a member's keys on removal, or re-check the creator's membership in `authenticateApiKey`.
+
 ## Environment notes
 
 - Node 22, pnpm 10. Global `tsc` 6.0.2 and Playwright 1.63.0 exist under `/opt/node22`, but project
