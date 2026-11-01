@@ -23,9 +23,13 @@ Phase 1 delivered, checkpoint by checkpoint:
 **Phase 2 (live tracking) is complete on branch `phase-2-live-tracking`** (checkpoint 5 reached).
 format:check, lint, typecheck, test (212 unit + 188 integration), build and test:e2e (13 specs)
 pass. **Next: Phase 4a (deployment), before Phase 3**, on branch `phase-4a-deploy` (the owner chose a live
-demo URL first). Design: `docs/architecture.md`, "Phase 4a: deployment". Checkpoints:
+demo URL first). Design: `docs/architecture.md`, "Phase 4a: deployment". Checkpoint 1 is done
+(as-built notes under "CI and hardening (Phase 4a, checkpoint 1)" below): format:check, lint,
+typecheck, test (238 unit + 188 integration), build and test:e2e (15 specs) pass; **next is
+checkpoint 2**.
+Checkpoints:
 
-1. **CI and hardening.** GitHub Actions workflow (Postgres service, all six checks, Playwright's own
+1. **[done] CI and hardening.** GitHub Actions workflow (Postgres service, all six checks, Playwright's own
    Chromium in CI), runtime env validation with Zod (lazy, clear messages), security headers incl.
    CSP for OpenFreeMap, `robots.txt`.
 2. **Deploy pipeline and demo mode.** `vercel-build` (validate, migrate on the direct URL, idempotent
@@ -589,6 +593,72 @@ import.meta.url).href)` makes Turbopack emit the worker to `/_next/static/media/
   Hamburg road route, and the public page of a simulator-delivered shipment (text only, notes
   read well). Nothing needed fixing beyond the known marker overlap.
 
+### CI and hardening (Phase 4a, checkpoint 1)
+
+- **Runtime environment: `src/server/env.ts`.** App code reads `env.database.url`,
+  `env.database.directUrl`, `env.auth.secret`/`url`, `env.realtime.streamSeconds` and
+  `env.demo.enabled`/`cronSecret`, never `process.env`. Each group is validated with Zod the first
+  time it is read (then cached), so importing never throws and `next build` needs no env. Errors
+  name the variable and never echo a value. Reading `env.database` does not require the auth
+  variables, so the seed and simulator still run with only a database URL.
+  - `createEnv(source)` builds the same lazy object from any record (unit tests);
+    `validateEnv(source)` checks every group at once and lists all problems, for the
+    `vercel-build` validation step in checkpoint 2.
+  - Direct URL precedence: `DATABASE_DIRECT_URL`, then `DATABASE_URL_UNPOOLED` (Neon's Vercel
+    integration), then `DATABASE_URL`. Blank values count as unset (`.env.example` lists them
+    blank). Vitest and Playwright set `DATABASE_DIRECT_URL` to the test database explicitly, so an
+    `UNPOOLED` URL in `.env` can never point a test's listener elsewhere.
+  - A malformed `REALTIME_STREAM_SECONDS` (`soon`, `0`, `12.5`) now fails the first stream with a
+    clear error instead of silently using 270 s. `streamLifetimeMs` takes the parsed number.
+  - Better Auth gets `secret` and `baseURL` from `env.auth` explicitly (it would otherwise read
+    `process.env` itself, unvalidated). The secret must be at least 32 characters.
+  - Scripts (`scripts/*`, `tests/e2e/*.ts`, `drizzle.config.ts`) and test setups keep their own
+    `process.env` reads: they deliberately point `DATABASE_URL` at other databases and run name
+    guards first.
+- **Security headers: `src/lib/security-headers.ts`**, applied to every path by `headers()` in
+  `next.config.ts` (pure module, unit tested; `next.config.ts` imports it by relative path).
+  - The CSP allows `'unsafe-inline'` scripts on purpose (decision 40): Next inlines the RSC
+    payload as `<script>` tags, and nonces would make every partially prerendered page dynamic.
+    Verified: without `'unsafe-inline'`, sign-up never hydrates. `react/no-danger` is an ESLint
+    error to back this up; never render raw HTML.
+  - Adding any external origin (analytics, an image host, an upload bucket in Phase 3) means adding
+    it to the right directive there; the e2e spec will fail otherwise.
+  - `worker-src 'self'` is enough: MapLibre's worker is a bundled same-origin file
+    (`setWorkerUrl`). `blob:` was tried and removed (tested against real tiles without it).
+  - No `upgrade-insecure-requests`: Vercel serves HTTPS only (and adds HSTS), every URL the app
+    uses is relative or `https:`, and the directive would only get in the way of local HTTP runs.
+  - In `next dev` the policy adds `'unsafe-eval'` (React's dev tooling); never in production.
+- **`tests/e2e/security-headers.spec.ts`** walks the landing page, sign-in, dashboard, driver app
+  (sharing its location), live map, detail page and public tracking page, and fails on any
+  `securitypolicyviolation` event or console CSP report (`recordCspViolations` in `helpers.ts`).
+  Proven red three ways: no `'unsafe-inline'` (scripts), no tile origin in `connect-src` (caught
+  even with tiles blocked, since the style request is checked before Playwright's routing), and
+  `worker-src 'none'`.
+- **`E2E_MAP_TILES=live pnpm test:e2e`** makes `blockMapTiles` a no-op so maps load the real
+  basemap (manual checks and screenshots only; never in CI). Gotcha: `signUp` sets an
+  `x-forwarded-for` header on the whole context, which also goes to the tile server and turns
+  every map request into a CORS preflight it refuses. Clear it (`setExtraHTTPHeaders({})`) before
+  opening a map with live tiles.
+- **`robots.ts`** allows `/` and disallows `/dashboard`, `/driver`, `/track`, `/api`, `/sign-in`
+  and `/sign-up`. Not `Disallow: /` + `Allow: /$`: that would also block the landing page's
+  assets under `/_next/`. Tracking pages keep their `noindex` (robots.txt does not stop a linked URL
+  being indexed).
+- **CI: `.github/workflows/ci.yml`.** Order matters: format, lint and typecheck, then `pnpm build`
+  **before** any `.env` exists (proves the no-env-at-import rule on every push), then the
+  database role and `.env` (throwaway secret from `openssl rand`), `pnpm test`, Playwright's own
+  Chromium (`playwright install --with-deps chromium`, CI only, never here), `pnpm test:e2e`. The
+  HTML report (CI reporter: `github` + `html`) and `test-results/` traces are uploaded on failure.
+  Actions are pinned to the newest major tags as of November 2026 (checkout v7, setup-node v7,
+  pnpm/action-setup v6, upload-artifact v7; looked up with `git ls-remote --tags`). The job
+  builds twice (once without env, once inside `test:e2e` against the e2e database), about a minute.
+- **Validating the workflow locally:** YAML parsed with js-yaml, then the exact command sequence
+  ran in a fresh `git clone` with `CI=true` against a brand-new Postgres 16 cluster
+  (`pg_createcluster 16 ci -p 5433`, dropped afterwards), the only difference being the port.
+  All green (15 e2e specs). The first real GitHub run happens on push.
+- **Visual check** (1280 px and 390 px, production build, real tiles): landing, sign-in, live map,
+  staff detail with route map, driver detail and public tracking page all render normally under
+  the CSP (fonts, styles, tiles, glyphs, markers). Nothing needed fixing.
+
 ### Testing
 
 - `pnpm test` runs two Vitest projects: `unit` (`src/**/*.test.ts`) and `integration`
@@ -604,6 +674,14 @@ import.meta.url).href)` makes Turbopack emit the worker to `/_next/static/media/
   (history rows cannot be deleted anyway).
 
 ## Known issues / TODOs
+
+- **The CSP allows inline scripts** (decision 40). An injected inline `<script>` would run; the
+  defences are React's escaping and the `react/no-danger` lint rule. If Next ever supports nonces
+  or hashes with partial prerendering, tighten `script-src`.
+- **Preview deployments and `BETTER_AUTH_URL`.** It is required, but each Vercel preview has its
+  own URL. Checkpoint 2 must set it per environment (or derive it from `VERCEL_URL` /
+  `VERCEL_BRANCH_URL` and add the origin to Better Auth's trusted origins) so sign-in works on
+  previews.
 
 - User deletion fails with an FK error once the user has created shipments or events (by design).
   Org deletion is disabled in Better Auth (`disableOrganizationDeletion`).
