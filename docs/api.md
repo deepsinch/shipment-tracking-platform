@@ -20,17 +20,18 @@ curl -H "Authorization: Bearer $KEY" "$BASE/api/v1/shipments"
 | `shipments:write` | `POST /shipments`, `POST .../status`    |
 
 A key acts for its organization only. Other organizations' shipments do not exist for it (`404`).
-`GET /tracking/{code}` is public and needs no key.
+`GET /tracking/{code}` is public and needs no key. Its `signedBy` is the printed name of whoever
+signed for a delivered shipment (`null` otherwise).
 
 ## Endpoints
 
-| Method and path                      | Scope             | Notes                                            |
-| ------------------------------------ | ----------------- | ------------------------------------------------ |
-| `GET /api/v1/shipments`              | `shipments:read`  | `page`, `pageSize` (max 100), `status`, `search` |
-| `GET /api/v1/shipments/{id}`         | `shipments:read`  | With history; sets `ETag`                        |
-| `POST /api/v1/shipments`             | `shipments:write` | `201`, `Location` and `ETag`                     |
-| `POST /api/v1/shipments/{id}/status` | `shipments:write` | Requires `If-Match`                              |
-| `GET /api/v1/tracking/{code}`        | none              | What the public tracking page shows              |
+| Method and path                      | Scope             | Notes                                                 |
+| ------------------------------------ | ----------------- | ----------------------------------------------------- |
+| `GET /api/v1/shipments`              | `shipments:read`  | `page`, `pageSize` (max 100), `status`, `search`      |
+| `GET /api/v1/shipments/{id}`         | `shipments:read`  | With history; sets `ETag`                             |
+| `POST /api/v1/shipments`             | `shipments:write` | `201`, `Location` and `ETag`                          |
+| `POST /api/v1/shipments/{id}/status` | `shipments:write` | Requires `If-Match`                                   |
+| `GET /api/v1/tracking/{code}`        | none              | What the public tracking page shows, incl. `signedBy` |
 
 ```sh
 # Book a shipment
@@ -118,11 +119,15 @@ rotate it there (the old one stops signing at once).
 
 ### Events
 
-| `type`                     | When                                      | `data` besides `shipment` and `version`                                    |
-| -------------------------- | ----------------------------------------- | -------------------------------------------------------------------------- |
-| `shipment.created`         | A shipment was booked (dashboard or API)  | none                                                                       |
-| `shipment.status_changed`  | A shipment moved to a new status          | `change`: `fromStatus`, `toStatus`, `occurredAt`, `location`, `publicNote` |
-| `shipment.driver_assigned` | A driver was assigned, changed or removed | `assignment`: `fromDriverName`, `toDriverName`                             |
+| `type`                     | When                                      | `data` besides `shipment` and `version`                                                                  |
+| -------------------------- | ----------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `shipment.created`         | A shipment was booked (dashboard or API)  | none                                                                                                     |
+| `shipment.status_changed`  | A shipment moved to a new status          | `change`: `fromStatus`, `toStatus`, `occurredAt`, `location`, `publicNote`; for `delivered` also `proof` |
+| `shipment.driver_assigned` | A driver was assigned, changed or removed | `assignment`: `fromDriverName`, `toDriverName`                                                           |
+
+For a delivery, `change.proof` is `{ "recipientName": "...", "hasSignature": true, "hasPhoto": false }`,
+or `null` when the delivery was marked from the office without proof. It never contains the signature
+or the photo, which stay in the application. Other changes have no `proof` key.
 
 ```json
 {

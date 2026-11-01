@@ -214,6 +214,28 @@ message carries an idempotency key, so a retry never sends a duplicate. The unsu
 signed with a key derived from `BETTER_AUTH_SECRET`: rotating that secret invalidates links in
 emails already sent.
 
+## Turning on delivery photos (optional)
+
+Drivers can add a photo when they deliver. It needs a **Vercel Blob** store; without one the driver
+app simply does not offer photos (the printed name and the signature still work), and demo mode
+never offers them whatever is configured.
+
+1. In the Vercel project open **Storage** (or the Marketplace), create a **Blob** store and connect
+   it to the project. When asked for access, choose **Private**: Waybill stores every photo with
+   private access and shows it to staff through the app, never through a public link.
+2. Connecting the store adds `BLOB_READ_WRITE_TOKEN` to the project's environment variables
+   (Production and, if you choose, Preview). Nothing else to set.
+3. Redeploy. The delivery sheet now shows "Take a photo".
+
+Photos are shrunk in the browser (1600 px JPEG), at most 4 MB on the server (Vercel's request limit
+is 4.5 MB), with location metadata removed before storage. They are kept until you delete them in
+the Blob store: there is no retention job yet. A photo of a delivery that failed to save is deleted
+again; a crash in that moment can leave one unreferenced private file.
+
+Not verified against the real service from the build environment (vercel.com is unreachable there):
+the adapter follows `@vercel/blob` 2.8's `put`, `get` and `del` with `access: "private"`. Check one
+real delivery with a photo after enabling it.
+
 ## Turning demo mode off
 
 Demo mode is a deployment setting. To switch it off:

@@ -1,6 +1,7 @@
 import { blockMapTiles, expect, test } from "./fixtures";
 import {
   addDriver,
+  deliverFromDriverApp,
   createShipment,
   expectLive,
   expectNotReloaded,
@@ -99,11 +100,7 @@ test("the live map follows a driver's location and drops the shipment once deliv
   await expect(
     page.getByRole("button", { name: new RegExp(`^${trackingCode}, Out for delivery`) }),
   ).toBeVisible();
-  await phone.getByRole("button", { name: "Mark as delivered" }).click();
-  await phone
-    .getByRole("alertdialog", { name: `Mark ${trackingCode} as delivered?` })
-    .getByRole("button", { name: "Confirm delivery" })
-    .click();
+  await deliverFromDriverApp(phone);
   await expect(phone.getByTestId("form-status")).toHaveText("Status changed to Delivered.");
 
   await expect(page.getByTestId("map-marker")).toHaveCount(0);

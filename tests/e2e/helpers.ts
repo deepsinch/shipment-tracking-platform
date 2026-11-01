@@ -140,6 +140,20 @@ export async function createShipment(
   return (await heading.textContent())!.trim();
 }
 
+/**
+ * Delivers from the driver app: opens the delivery sheet, types the recipient's printed name and
+ * confirms (no signature, no photo: the printed name is the proof). The caller checks the result.
+ */
+export async function deliverFromDriverApp(
+  phone: Page,
+  recipientName = "Grace Recipient",
+): Promise<void> {
+  await phone.getByRole("button", { name: "Mark as delivered" }).click();
+  const sheet = phone.getByRole("dialog", { name: /^Deliver WB-/ });
+  await sheet.getByLabel("Recipient's printed name").fill(recipientName);
+  await sheet.getByRole("button", { name: "Confirm delivery" }).click();
+}
+
 /** Submits the status form on a shipment's detail page. */
 export async function changeStatus(
   page: Page,

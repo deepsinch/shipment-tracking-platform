@@ -94,9 +94,11 @@ Each checkpoint green and reviewed, like Phase 2. Suggested order (later ones bu
 3. **[done] Email notifications via Resend.** Customer emails on chosen status changes (recipient email
    already stored), from the same outbox; templates with the public tracking link; idempotency key
    per event; unsubscribe link; test mode without a key in development.
-4. **Proof of delivery.** Photo and signature captured in the driver app on delivery, uploaded to
-   object storage (private, signed URLs), linked to the `delivered` event; replaces the client-side
-   confirm step for deliveries and gives the public page a "signed by" line (no photo publicly).
+4. **[done] Proof of delivery.** Printed name (required), drawn signature (optional, vector strokes) and
+   photo (optional, private Vercel Blob) captured in the driver app's delivery sheet, written with the
+   `delivered` event in one transaction (`delivery_proofs`, migration 0010, append-only). Replaces the
+   confirm step for drivers' deliveries; staff can still mark a delivery from the office (confirm
+   dialog, recorded as no proof). The public page, webhook and email say who signed, nothing more.
 5. **AI intake of shipment request emails.** Inbound email (webhook from the mail provider) parsed
    by an LLM into a draft shipment (structured output validated by the same Zod schema), shown to a
    dispatcher for review before `createShipment`; never auto-booked. Evaluate on a small fixture set.
@@ -866,6 +868,55 @@ Resend in `docs/deployment.md`.
   check at queue time or at send time, and a changing idempotency key each fail their tests.
 - **Mobile navigation:** the Emails link is in the desktop header only; both pages were checked at
   390 px (no horizontal scroll).
+
+### Proof of delivery (Phase 3, checkpoint 4)
+
+Design in `docs/architecture.md` ("Proof of delivery", "As built (checkpoint 4)"), decisions 67 to 72;
+enabling Blob in `docs/deployment.md`.
+
+- **Where things are.** Pure: `src/domain/delivery-proof.ts` (signature schema and caps, SVG path
+  building, photo sniffing and metadata stripping, `photoCaptureAvailable`),
+  `src/lib/signature-recorder.ts` (the pad's state machine), `src/lib/photo-resize.ts`.
+  I/O: `src/server/storage/` (`PhotoStorage` interface, Vercel Blob adapter, in-memory fake),
+  `services/deliver-shipment.ts` (validates, stores the photo, composes `changeShipmentStatus`),
+  `services/delivery-proof.ts` (staff read model, photo read), the photo route
+  `/dashboard/shipments/[id]/proof-photo`. UI: `delivery-sheet.tsx` (driver), `SignaturePad`,
+  `SignatureView`, `ProofOfDeliveryCard`.
+- **`changeShipmentStatus` takes `deps.proof`** (a validated `DeliveryProofRecord`) and writes the
+  `delivery_proofs` row after the event, inside the same transaction and before the webhook and
+  email enqueues, so those can mention it. A **driver cannot deliver without proof** (validation
+  error on `recipientName`); staff and API keys can, and no row is written. Seed and simulator pass
+  `sampleProof(...)` (generated signature, `demo/sample` photo key) for drivers' deliveries.
+- **No FK from `delivery_proofs.event_id` to `shipment_events`.** A table that other tables reference
+  cannot be truncated at all (Postgres answers `0A000` before any trigger runs), which turned the
+  existing "TRUNCATE is rejected" test for `shipment_events` red. Proofs are tied to their shipment
+  by the composite tenant FK and to their event by the one code path that writes both.
+- **Photo order of operations:** validate, gate (shipment visible and role allowed) before any
+  upload, upload under `delivery-proofs/<org>/<shipment>/<uuid>.<ext>`, run the transaction, delete
+  the photo if it did not commit. A crash in between leaves an unreferenced private file. Upload
+  has a 20 s timeout (`photo_failed` result, nothing delivered), found by a screenshot run with a
+  fake token where the SDK's retries made "Delivering..." hang.
+- **Server Action body limit raised to 4.5 MB** (`next.config.ts`, `experimental.serverActions`) for the
+  photo; server cap is 4 MB. The browser shrinks photos to 1600 px JPEG first (drops EXIF, fixes
+  rotation, converts HEIC/WebP); the server sniffs magic bytes, accepts JPEG and PNG only and strips
+  EXIF/XMP/IPTC/comments (JPEG) or `eXIf`/text chunks (PNG) itself. WebP is refused server-side.
+- **Preview of the photo before upload is a `data:` URL** (the CSP allows `data:` images, not `blob:`).
+  No CSP change was needed at all: the stored photo is proxied through the route (`img-src 'self'`).
+- **E2E:** the e2e server has no Blob token, so photo capture is hidden there. To look at the photo UI
+  run Playwright with `BLOB_READ_WRITE_TOKEN=anything`; do not submit a photo (it would try the real
+  store). Photos are covered by integration tests with the fake and the demo spec's sample photo.
+  Locate the proof card with `[data-testid=proof-of-delivery]:visible` (a hidden copy can exist).
+- **The delivery sheet pins the version** it was opened at, so a live refresh behind it cannot turn
+  the delivery into one of a changed shipment (conflict instead).
+- **Proven red:** proof written with `getDb()` instead of `tx` (rollback test), a public projection
+  that returns more than the name (key-set test), the photo storage factory ignoring `enabled`
+  (two tests: demo mode would build the Blob adapter).
+- **Known gaps:** no retention or erasure for proofs or photos (decision 70), no sweep of
+  unreferenced photos, the Blob adapter is not exercised against the real service from CI or this
+  environment (unit test with the SDK mocked), no way to add proof to a delivery afterwards, the
+  driver app does not show the proof after delivering, the sheet's photo and signature are lost if
+  the sheet is closed.
+- **Mobile navigation:** unchanged. Sheet, staff card and public page checked at 390 and 1280 px.
 
 ### Testing
 

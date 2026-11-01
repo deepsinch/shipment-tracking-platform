@@ -822,11 +822,46 @@ LOCKED` and a lease, send with no transaction open, attempts-guarded outcome wri
 ### Proof of delivery
 
 - The signature is captured as vector strokes (small JSON) and stored in the database, so it needs no
-  storage account. The photo goes to private object storage (Vercel Blob), with short-lived signed
-  URLs for staff only.
+  storage account. The photo goes to private object storage (Vercel Blob) and is shown to staff
+  through an authenticated route handler (the plan for short-lived signed URLs changed, decision 69).
 - In demo mode, photo upload is disabled (no visitor files are stored) and a sample photo is shown.
   Signatures still work.
 - The public page shows "Delivered, signed by <name>" and never the photo or the signature.
+
+#### As built (checkpoint 4)
+
+- **Table** (migration 0010, additive): `delivery_proofs` (organization, shipment via the composite
+  tenant FK, `event_id` of the delivered event, `recipient_name`, `signature` jsonb or null,
+  `photo_key` or null, `captured_by`, `captured_at`; unique per shipment and per event; CHECKs repeat
+  the name and signature limits). A trigger rejects UPDATE, DELETE and TRUNCATE, like history. No
+  proof row means a delivery without proof (decisions 67, 70).
+- **Capture** (driver app): "Mark as delivered" opens the delivery sheet instead of the confirm
+  dialog: printed name (required), signature pad (optional), photo (optional, only when storage is
+  configured and demo mode is off). It calls `deliverShipment`, which validates, stores the photo and
+  composes `changeShipmentStatus` so the proof row is written in the status transaction. A driver's
+  delivery without a name is a validation error at the service. Staff keep the confirm dialog and
+  record no proof.
+- **Signature:** `{ aspect, strokes: [[x, y], ...] }`, coordinates normalised to 0..1 and rounded to
+  three decimals, at most 32 KB of JSON (Zod and a CHECK), 100 strokes, 2500 points. The pad uses
+  pointer events (touch, pen, mouse), thins points, supports undo and clear, and stops at a byte
+  budget below the cap. It is rendered again as SVG paths built from numbers in React.
+  The signature is optional (decision 68).
+- **Photo:** `PhotoStorage` (`put`, `get`, `delete`) with a Vercel Blob adapter (`access: "private"`)
+  and an in-memory fake. Selected by `env.photos.enabled` (a token and not demo mode); otherwise the
+  storage is null and any photo is refused, so demo mode cannot store a file whatever the UI does.
+  Magic-byte sniffing (JPEG, PNG), 4 MB, metadata stripped on the server, key
+  `delivery-proofs/<org>/<shipment>/<uuid>.<ext>`. Staff see it through a route handler that checks
+  the session, the organization and the role and streams the bytes (decision 69).
+- **Who sees what:** staff detail page: the proof card (name, signature, photo, who and when).
+  Public page and public API: `signedBy`, the name only. Webhook `shipment.status_changed` for a
+  delivery: `change.proof` = `{ recipientName, hasSignature, hasPhoto }` or `null`. Customer email:
+  "Signed by <name>". The signature and the photo go nowhere else (decision 71).
+- **Demo mode:** photo capture is hidden and refused; signatures and names work. Seeded and simulated
+  driver deliveries get a generated signature and the `demo/sample` photo key, which the staff view
+  shows as a labelled sample image (`public/demo/sample-delivery-photo.svg`). Nothing a visitor
+  draws is shown to anyone else, but their name and signature are stored until the nightly reset.
+- **Not done on purpose:** adding proof to a delivery afterwards, retention or erasure, a photo gallery,
+  GPS stamp of the capture, an offline queue for deliveries.
 
 ### AI intake
 
@@ -908,3 +943,9 @@ LOCKED` and a lease, send with no transaction open, attempts-guarded outcome wri
 | 64  | The unsubscribe token's key is derived from `BETTER_AUTH_SECRET` (HMAC with a fixed label), not a new `EMAIL_TOKEN_SECRET`                    | One less secret for the owner to set and leak; domain separation means the auth secret itself never signs a link; rotation already signs everyone out                                                                                                                                                                                                                                       | A separate secret (cleaner rotation, one more variable); storing a random token per recipient (a lookup, but revocable and no secret)                                                                                                                                                                 |
 | 65  | Email previews show the text version only                                                                                                     | The HTML is stored and sent, but rendering stored markup in the dashboard, or in a sandboxed `srcdoc` frame, would need the CSP loosened for little gain; the text carries the same content and cannot run anything                                                                                                                                                                         | A sandboxed iframe (needs `frame-src`/`child-src` changes); rendering the HTML directly (banned)                                                                                                                                                                                                      |
 | 66  | Opt-outs are per organization and address and are checked when queueing and again when sending                                                | Covers the customer's future shipments, never crosses carriers, and honours an unsubscribe that happens while a message is queued                                                                                                                                                                                                                                                           | Per shipment (does not cover new shipments); checking only at queue time                                                                                                                                                                                                                              |
+| 67  | A driver's delivery needs proof (the printed name); staff may deliver without proof, recorded as none                                         | Drivers are at the door and can be asked; the office confirms what a phone call or customer told it. Blocking staff would push them to invent a name. The card says "No proof was recorded" so the difference is visible                                                                                                                                                                    | Proof for every role (staff would type a made-up name); proof only in the UI (a hand-made request bypasses it)                                                                                                                                                                                        |
+| 68  | The signature is optional, the printed name is the proof                                                                                      | A keyboard or screen reader user cannot draw, some recipients cannot or will not sign, and a finger-drawn signature has little evidential weight. One rule for everyone, and `hasSignature` tells receivers which they got                                                                                                                                                                  | Signature required for pointer users (blocks deliveries, two classes of delivery); a typed "signature"                                                                                                                                                                                                |
+| 69  | Photos are private in Blob and streamed to staff through a route handler, no signed URLs                                                      | A signed URL is a bearer link: it works for its lifetime for anyone who gets it, outlives a removed member and lands in logs and referrers. The route checks session, organization and role on every view, needs no CSP change and never exposes the storage location. Cost: the bytes pass through a function                                                                              | Short-lived presigned URLs (`presignUrl`, extra CSP origin, link outlives access); public blobs under unguessable paths (anyone with the URL)                                                                                                                                                         |
+| 70  | `delivery_proofs` is append-only with no retention job yet                                                                                    | A proof is evidence, so nobody may edit or delete it, in code or in SQL. Retention and erasure depend on the owner's legal basis; when decided it needs a deliberate migration (for example a function that purges a closed organization), not an exception now                                                                                                                             | Allow DELETE for a purge job today (an undefended hole for no current need); keep proofs editable                                                                                                                                                                                                     |
+| 71  | Webhooks and the public page carry the name and booleans only; the public page is key-set tested                                              | The recipient's name is already on the shipment; the signature and the photo are personal data with no reason to leave the application. Receivers can ask the dashboard if they need more                                                                                                                                                                                                   | Include the signature as a data URL (large, sensitive); a signed link to the photo in the webhook                                                                                                                                                                                                     |
+| 72  | EXIF stripping by walking JPEG segments and PNG chunks on the server, plus a canvas re-encode in the browser                                  | About 60 lines and no dependency; the server does not trust the browser. Only JPEG and PNG are accepted (the browser turns HEIC and WebP into JPEG)                                                                                                                                                                                                                                         | `sharp` (native binary, heavy for a serverless bundle); client-side only (not a boundary)                                                                                                                                                                                                             |
