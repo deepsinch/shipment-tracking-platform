@@ -39,7 +39,9 @@ Tick these off as you go. Each item is explained in the numbered steps below.
 - A daily cron job (03:00 UTC) wipes and recreates the demo data, so the demo never fills up with
   strangers' test data.
 - While someone has the live map or a shipment page open, the browser asks the server to move the
-  demo trucks one step every ~12 seconds. Nothing runs when nobody is looking.
+  demo trucks one step every ~12 seconds. Nothing runs when nobody is looking. When fewer than 6
+  shipments are left to drive, the same tick books up to 2 new ones as the demo dispatcher, so the
+  map keeps trucks on it all day; the nightly reset clears them with the rest.
 
 ## 1. Create the accounts
 
@@ -221,8 +223,9 @@ in a visible tab, signed in as a member of Demo Freight Co. In the browser's Net
 should see a `POST /api/demo/tick` about every 12 seconds, answering `{"ran":true,…}` or
 `{"ran":false,"reason":"throttled"}` (another viewer's tick ran moments ago: fine). A 404 means
 demo mode is off in that deployment, a 403 means you signed in to another company. If every truck
-is already delivered (it takes a few minutes of viewing to drive all of them), the map is empty
-until the nightly reset.
+is already delivered, the next ticks book new shipments (up to two per tick, until six are on
+the road), so the map refills within a minute of viewing. If it stays empty, check the Vercel
+function logs of `/api/demo/tick` for a refused booking (the demo dispatcher account missing).
 
 **The nightly job does not run.** Cron jobs run only on **production** deployments, so a preview
 never resets. On the Hobby plan a daily job may run at any time within its scheduled hour.

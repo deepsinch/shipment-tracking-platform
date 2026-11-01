@@ -45,7 +45,7 @@ The data resets every night around 03:00 UTC. It runs on Vercel and Neon; the wh
 - **Road routes:** the detail page draws the real driving route for the demo's city pairs, from
   committed OpenStreetMap routing fixtures (no routing service at runtime).
 - **Truck simulator** (`pnpm simulate`): drives the demo trucks along those roads as their driver,
-  through the same rules as a real phone, so the map moves.
+  through the same rules as a real phone, so the map moves, and books replacements when they run low.
 
 Next up (Phase 3): a public API, webhooks, email notifications, proof of delivery and AI intake of
 shipment requests (see the roadmap in [docs/implementation-notes.md](docs/implementation-notes.md)).
@@ -101,7 +101,8 @@ password `demo-password` (demo only):
 3. Sign in at http://localhost:3000/sign-in as `dispatcher@demo.test` / `demo-password`.
 4. In a second terminal, run `pnpm simulate`.
 5. Open **Live map**: the trucks move every 12 seconds along real roads, go out for delivery near
-   the address and are delivered (they then leave the map). Now and then one reports an exception
+   the address and are delivered (they then leave the map, and the simulator books new shipments
+   as the demo dispatcher so at least six are always on the road). Now and then one reports an exception
    and carries on a minute later. Open a shipment to see its route and live position, or its
    public tracking page to see the customer's view.
 
@@ -109,8 +110,9 @@ The simulator acts as each shipment's assigned driver through the app's own serv
 every rule a person does (it cannot cancel, it cannot ping faster than every 10 seconds). It also
 picks up assigned shipments still waiting at the sender: assign the demo driver to a new shipment
 booked between two demo cities and watch it join. Options: `--speed 60` (time compression, default
-30), `--shipments 3`, `--seed 7`, `--once`. Ctrl+C stops it. When everything is delivered it says
-so; reseed for another run.
+30), `--shipments 3`, `--seed 7`, `--once`, `--target 10` (shipments to keep on the road, default
+6), `--no-refill` (let the fleet run down instead). Ctrl+C stops it. With `--no-refill`, when everything is
+delivered it says so; reseed for another run.
 
 The seed runs once (a re-run is a no-op, because history is never deleted). For fresh dates, run
 `pnpm db:seed --reset`, which wipes and re-creates the local `waybill` database only.

@@ -595,6 +595,25 @@ import.meta.url).href)` makes Turbopack emit the worker to `/_next/static/media/
   Hamburg road route, and the public page of a simulator-delivered shipment (text only, notes
   read well). Nothing needed fixing beyond the known marker overlap.
 
+### Simulator refill (Phase 4a follow-up)
+
+- **Resolved: "the demo runs out of trucks".** The simulator books replacements when fewer than 6
+  drivable shipments remain (max 2 per tick). Design and decision 46 in the architecture doc; code
+  in `src/server/simulator/booking.ts` (pure, `booking.test.ts`) and `refill()` in `simulator.ts`.
+- **Gotcha: `assignDriver` has no injectable clock**, so in tests the `driver_assigned` event is
+  stamped with the real time while the test clock runs an hour in the past. History order by
+  `occurredAt` therefore puts it last; tests look events up by type. Harmless for status changes,
+  which only compare with the latest _status_ event.
+- **Gotcha: `TickReport` has a new required `booked` field**; tests that stub `tick()` must return
+  it (`booked: []`).
+- **Gotcha: the refill counts drivable shipments, not the whole organization's.** Unassigned or
+  uncoordinated shipments do not stop it from booking. A tick that finds an office-held exception
+  does not count that truck.
+- **`pnpm simulate` flags:** `--no-refill`, `--target <n>`. `--once` still books when short, with
+  the same seed it books the same shipments.
+- **Proven red:** with refill disabled in `refill()`, 3 of the 4 refill integration tests fail
+  (the fourth, "at target / no refill option", holds for both). Restored.
+
 ### CI and hardening (Phase 4a, checkpoint 1)
 
 - **Runtime environment: `src/server/env.ts`.** App code reads `env.database.url`,
@@ -768,12 +787,6 @@ import.meta.url).href)` makes Turbopack emit the worker to `/_next/static/media/
 - **The CSP allows inline scripts** (decision 40). An injected inline `<script>` would run; the
   defences are React's escaping and the `react/no-danger` lint rule. If Next ever supports nonces
   or hashes with partial prerendering, tighten `script-src`.
-- **The hosted demo runs out of moving trucks.** Trucks only move while someone views the map, at
-  30x compression (about 8 km per tick); viewing time adds up across visitors, so after a few
-  minutes of total viewing every assigned truck is delivered and the map is empty until the
-  nightly reset. Options if it bites: a slower compression for the hosted demo, a reset when a
-  tick finds nothing left (signs everyone out), or a simulator that books new work. Left as is.
-
 - User deletion fails with an FK error once the user has created shipments or events (by design).
   Org deletion is disabled in Better Auth (`disableOrganizationDeletion`).
 - Sign-up is two Better Auth calls (user, then org) that cannot share a DB transaction; on org
@@ -827,9 +840,8 @@ import.meta.url).href)` makes Turbopack emit the worker to `/_next/static/media/
 - **The simulator only drives shipments with stop coordinates.** UI bookings have none (the form
   does not geocode), so a new booking joins the demo only if it is assigned to a driver and has
   coordinates; seeded pairs follow roads, others a straight line. Geocoding at booking would fix it.
-- **The demo runs out.** After about 12 minutes at the defaults every assigned truck is delivered
-  and the simulator suggests `pnpm db:seed --reset`. The hosted demo has the nightly reset (see the
-  first item above for the remaining gap).
+- **Delivered demo shipments accumulate** between nightly resets (the simulator refills the fleet,
+  see "Simulator refill" below). Fine for the list (paginated) and the map (unfinished only).
 - **Simulator exceptions are coarse.** A 1 % chance per tick in transit, one per truck per run,
   always cleared after 5 ticks; no failed delivery attempts or returns.
 - **Route fixture licence.** OSRM demo data is OpenStreetMap (ODbL); the attribution is in the
