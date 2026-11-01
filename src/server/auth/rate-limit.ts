@@ -4,6 +4,8 @@ import { createHash } from "node:crypto";
 
 import { eq, sql } from "drizzle-orm";
 
+import { INTAKE_DAILY_LIMIT_DEMO, INTAKE_DAILY_LIMIT_PER_ORGANIZATION } from "@/domain/intake";
+
 import { getDb } from "@/server/db/client";
 import { authRateLimits } from "@/server/db/schema";
 
@@ -19,6 +21,7 @@ import { authRateLimits } from "@/server/db/schema";
  */
 
 const MINUTE = 60 * 1000;
+const DAY = 24 * 60 * MINUTE;
 
 export type RateLimitRule = { name: string; limit: number; windowMs: number };
 
@@ -35,6 +38,14 @@ export const RATE_LIMITS = {
   apiInvalidKeyPerIp: { name: "api:invalid-key:ip", limit: 30, windowMs: MINUTE },
   /** Per IP, public tracking lookups through the API (no key to count them against). */
   apiTrackingPerIp: { name: "api:tracking:ip", limit: 60, windowMs: MINUTE },
+  /** Per organization, every AI intake request: what the owner's Anthropic bill can be asked for. */
+  intakePerOrganization: {
+    name: "intake:organization",
+    limit: INTAKE_DAILY_LIMIT_PER_ORGANIZATION,
+    windowMs: DAY,
+  },
+  /** In demo mode, for everyone together: strangers share one organization and one bill. */
+  intakeDemoGlobal: { name: "intake:demo", limit: INTAKE_DAILY_LIMIT_DEMO, windowMs: DAY },
 } as const satisfies Record<string, RateLimitRule>;
 
 export type RateLimitStatus = { limited: false } | { limited: true; retryAfterMs: number };

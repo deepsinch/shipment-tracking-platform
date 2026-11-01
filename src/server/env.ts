@@ -4,13 +4,14 @@ import { z } from "zod";
 
 import { photoCaptureAvailable } from "@/domain/delivery-proof";
 import { selectEmailTransport } from "@/domain/email";
+import { intakeAvailable } from "@/domain/intake";
 
 import { resolveAuthUrls, type AuthUrlSource } from "./auth/base-url";
 
 /**
  * Runtime environment for the app, validated with Zod.
  *
- * Validation is lazy: each group (database, auth, realtime, demo, webhooks, email, photos) is parsed the first time code
+ * Validation is lazy: each group (database, auth, realtime, demo, webhooks, email, photos, intake) is parsed the first time code
  * reads it, and cached. Importing this module never throws, so `next build` and modules that are
  * only imported (never run) work without any environment variables. A missing or malformed
  * variable fails the first request that needs it, with a message naming the variable (never its
@@ -256,6 +257,44 @@ const photosSchema = z
     }),
   }));
 
+const intakeSchema = z
+  .object({
+    // The Anthropic API key. Without it AI intake is hidden.
+    ANTHROPIC_API_KEY: optionalString,
+    // Overrides the default model id (see DEFAULT_INTAKE_MODEL).
+    INTAKE_MODEL: optionalString,
+    INTAKE_USE_FAKE_MODEL: z.preprocess(
+      (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+      z.enum(["true", "false"], { error: 'must be "true" or "false"' }).optional(),
+    ),
+    // Read only to refuse the fake where it must never be on.
+    VERCEL: optionalString,
+    DEMO_MODE: optionalString,
+  })
+  .superRefine((env, ctx) => {
+    if (env.INTAKE_USE_FAKE_MODEL !== "true") return;
+    if (env.VERCEL || env.DEMO_MODE === "true") {
+      ctx.addIssue({
+        code: "custom",
+        path: ["INTAKE_USE_FAKE_MODEL"],
+        message:
+          "must not be set on Vercel or in demo mode: it replaces the model with recorded " +
+          "answers (tests and local development only)",
+      });
+    }
+  })
+  .transform((env) => {
+    const useFake = env.INTAKE_USE_FAKE_MODEL === "true";
+    return {
+      apiKey: env.ANTHROPIC_API_KEY,
+      model: env.INTAKE_MODEL,
+      /** Tests and local runs only: recorded answers instead of the API. Refused on Vercel and in demo mode. */
+      useFake,
+      /** The feature is shown only with a key (or the test-only fake). */
+      enabled: intakeAvailable({ apiKey: env.ANTHROPIC_API_KEY, useFake }),
+    };
+  });
+
 const groups = {
   database: databaseSchema,
   auth: authSchema,
@@ -264,6 +303,7 @@ const groups = {
   webhooks: webhooksSchema,
   email: emailSchema,
   photos: photosSchema,
+  intake: intakeSchema,
 };
 
 type Groups = typeof groups;
@@ -305,6 +345,7 @@ export function createEnv(source: Source): ServerEnv {
     webhooks: { get: lazy("webhooks"), enumerable: true },
     email: { get: lazy("email"), enumerable: true },
     photos: { get: lazy("photos"), enumerable: true },
+    intake: { get: lazy("intake"), enumerable: true },
   });
 }
 

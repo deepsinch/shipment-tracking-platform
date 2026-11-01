@@ -298,6 +298,52 @@ describe("photos", () => {
   });
 });
 
+describe("intake", () => {
+  it("is off without a key", () => {
+    expect(createEnv({}).intake).toEqual({
+      apiKey: undefined,
+      model: undefined,
+      useFake: false,
+      enabled: false,
+    });
+    expect(createEnv({ ANTHROPIC_API_KEY: "" }).intake.enabled).toBe(false);
+  });
+
+  it("is on with a key, and the model id can be overridden", () => {
+    expect(
+      createEnv({ ANTHROPIC_API_KEY: "sk-ant-x", INTAKE_MODEL: "claude-x" }).intake,
+    ).toMatchObject({
+      enabled: true,
+      model: "claude-x",
+      useFake: false,
+    });
+  });
+
+  it("allows the recorded-answers fake for tests, and refuses it on Vercel and in demo mode", () => {
+    expect(createEnv({ INTAKE_USE_FAKE_MODEL: "true" }).intake).toMatchObject({
+      useFake: true,
+      enabled: true,
+    });
+    for (const where of [{ VERCEL: "1" }, { DEMO_MODE: "true" }]) {
+      expect(() => createEnv({ INTAKE_USE_FAKE_MODEL: "true", ...where }).intake).toThrow(
+        /INTAKE_USE_FAKE_MODEL must not be set on Vercel or in demo mode/,
+      );
+    }
+  });
+
+  it("works in demo mode with a real key", () => {
+    expect(createEnv({ ANTHROPIC_API_KEY: "sk-ant-x", DEMO_MODE: "true" }).intake.enabled).toBe(
+      true,
+    );
+  });
+
+  it("does not echo the key when the group is rejected", () => {
+    expect(
+      () => createEnv({ ANTHROPIC_API_KEY: "sk-ant-secret", INTAKE_USE_FAKE_MODEL: "yes" }).intake,
+    ).not.toThrow(/sk-ant-secret/);
+  });
+});
+
 describe("validateEnv", () => {
   it("returns every group for a valid environment", () => {
     const env = validateEnv(valid);
