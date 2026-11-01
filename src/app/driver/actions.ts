@@ -2,7 +2,7 @@
 
 import type { Fix, SendOutcome } from "@/lib/location-sharer";
 import { requireAuthContext } from "@/server/auth/session";
-import { recordLocationPing } from "@/server/services/record-location-ping";
+import { recordDriverLocation } from "@/server/services/record-driver-location";
 
 /**
  * Location pings from the driver app. A Server Action rather than a route handler: it is called
@@ -13,12 +13,16 @@ import { recordLocationPing } from "@/server/services/record-location-ping";
  * The client never sends faster than the throttle interval, but the service enforces it anyway.
  */
 
-/** The ping as the driver app sends it: the latest fix for the shipment on screen. */
-export type LocationPingInput = Fix & { shipmentId: string };
+/**
+ * The ping as the driver app sends it: the latest fix for the shipment on screen. On the public
+ * demo the app sends the shipment id alone (the server derives a simulated position and ignores
+ * anything else, see `recordDriverLocation`); everywhere else the fix is required.
+ */
+export type LocationPingInput = { shipmentId: string } & Partial<Fix>;
 
 export async function sendLocationPingAction(input: LocationPingInput): Promise<SendOutcome> {
   const ctx = await requireAuthContext();
-  const result = await recordLocationPing(ctx, input);
+  const result = await recordDriverLocation(ctx, input);
 
   if (result.ok) return result.accepted ? { status: "sent" } : { status: "throttled" };
   switch (result.reason) {
@@ -34,6 +38,14 @@ export async function sendLocationPingAction(input: LocationPingInput): Promise<
         status: "stopped",
         message: "This shipment is no longer assigned to you, so location sharing stopped.",
         refresh: true,
+      };
+    case "no_route":
+      // Demo mode only: a shipment booked without coordinates has no route to simulate along.
+      return {
+        status: "stopped",
+        message:
+          "This demo shipment has no route coordinates, so there is no simulated position to share.",
+        refresh: false,
       };
     case "forbidden":
       return {

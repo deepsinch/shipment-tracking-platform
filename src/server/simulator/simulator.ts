@@ -23,6 +23,7 @@ import {
   type Booking,
   type RefillConfig,
 } from "./booking";
+import { roundDegrees as round } from "./simulated-position";
 import {
   DEFAULT_SIMULATOR_CONFIG,
   planTick,
@@ -410,5 +411,4 @@ function describe(action: TruckAction, route: MeasuredRoute): string {
   return `→ ${action.toStatus} "${action.publicNote}"`;
 }
 
-const round = (degrees: number) => Math.round(degrees * 1e5) / 1e5;
 const timeOf = (date: Date) => date.toISOString().slice(11, 19);

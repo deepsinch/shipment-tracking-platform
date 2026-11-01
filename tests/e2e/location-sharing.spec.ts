@@ -37,6 +37,8 @@ test("a driver shares their location while the shipment is on the road", async (
   await toggle.click();
   await expect(toggle).toBeChecked();
   await expect(phone.getByTestId("location-status")).toContainText(/Sharing location · last sent/);
+  // Outside the demo it is the device's real position, and nothing says otherwise.
+  await expect(phone.getByTestId("demo-location-note")).toHaveCount(0);
   // The status is announced as the switch's description.
   await expect(toggle).toHaveAccessibleDescription(/Sharing location · last sent/);
 

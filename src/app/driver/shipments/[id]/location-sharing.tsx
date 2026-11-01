@@ -8,7 +8,11 @@ import { sendLocationPingAction } from "@/app/driver/actions";
 import { Switch } from "@/components/ui/switch";
 import { PING_INTERVAL_MS } from "@/domain/location-sharing";
 import { formatElapsed } from "@/lib/format";
-import { startLocationSharing, type SharingState } from "@/lib/location-sharer";
+import {
+  createSimulatedPositionSource,
+  startLocationSharing,
+  type SharingState,
+} from "@/lib/location-sharer";
 import { cn } from "@/lib/utils";
 
 const noSubscription = () => () => {};
@@ -26,17 +30,24 @@ const noSubscription = () => () => {};
  * The status line ticks every second, so it is not a live region (it would chatter): the switch
  * points to it with `aria-describedby`, and a separate polite live region announces changes of
  * state only.
+ *
+ * On the public demo (`demo`), real geolocation is never requested: no `navigator.geolocation`
+ * call, so no permission prompt. The control works as usual, but the beat comes from a simulated
+ * source and only the shipment id is sent; the server shares a simulated position along the
+ * route, and the copy says so. See `recordDriverLocation`.
  */
-export function LocationSharing({ shipmentId }: { shipmentId: string }) {
+export function LocationSharing({ shipmentId, demo }: { shipmentId: string; demo: boolean }) {
   const router = useRouter();
   const switchId = useId();
   const statusId = useId();
-  const supported = useSyncExternalStore(
+  const geolocationSupported = useSyncExternalStore(
     noSubscription,
     () => "geolocation" in navigator,
     // Assume support while rendering on the server, so supported devices see no flash.
     () => true,
   );
+  // The demo needs no device support: it never uses the device's position.
+  const supported = demo || geolocationSupported;
   const [state, setState] = useState<SharingState>({ mode: "off" });
   const sharing = useRef<{ stop: () => void } | null>(null);
   const now = useNow(state.mode === "sharing");
@@ -58,8 +69,14 @@ export function LocationSharing({ shipmentId }: { shipmentId: string }) {
       return;
     }
     sharing.current = startLocationSharing({
-      geolocation: navigator.geolocation,
-      send: (fix) => sendLocationPingAction({ shipmentId, ...fix }),
+      // In the demo `navigator.geolocation` is not even read.
+      geolocation: demo
+        ? createSimulatedPositionSource({ beatMs: PING_INTERVAL_MS / 2 })
+        : navigator.geolocation,
+      // The demo sends the shipment id alone: no coordinates leave the browser.
+      send: demo
+        ? () => sendLocationPingAction({ shipmentId })
+        : (fix) => sendLocationPingAction({ shipmentId, ...fix }),
       onChange: setState,
       // Someone changed the shipment elsewhere: show its current status.
       onServerStop: (outcome) => outcome.refresh && router.refresh(),
@@ -67,7 +84,7 @@ export function LocationSharing({ shipmentId }: { shipmentId: string }) {
     });
   }
 
-  const status = describe(state, supported, now);
+  const status = describe(state, supported, now, demo);
 
   return (
     <div className="flex flex-col gap-3">
@@ -78,6 +95,11 @@ export function LocationSharing({ shipmentId }: { shipmentId: string }) {
             Dispatch sees where this shipment is while it is on the road. Customers never see your
             location.
           </span>
+          {demo && (
+            <span data-testid="demo-location-note" className="text-sm font-medium">
+              {DEMO_LOCATION_NOTE}
+            </span>
+          )}
         </label>
         <Switch
           id={switchId}
@@ -108,12 +130,17 @@ export function LocationSharing({ shipmentId }: { shipmentId: string }) {
   );
 }
 
+/** Shown in demo mode, where the shared position is simulated. */
+const DEMO_LOCATION_NOTE =
+  "Demo: a simulated position along the route is shared. Your real location is never used.";
+
 type Tone = "active" | "pending" | "muted" | "warning";
 
 function describe(
   state: SharingState,
   supported: boolean,
   now: number,
+  demo: boolean,
 ): { text: string; tone: Tone; announcement: string } {
   if (!supported) {
     const text = "Location sharing is not available in this browser.";
@@ -125,11 +152,17 @@ function describe(
         ? { text: state.notice, tone: "warning", announcement: state.notice }
         : { text: "Not sharing your location.", tone: "muted", announcement: "" };
     case "locating":
-      return {
-        text: "Finding your location…",
-        tone: "pending",
-        announcement: "Finding your location",
-      };
+      return demo
+        ? {
+            text: "Preparing a simulated position…",
+            tone: "pending",
+            announcement: "Preparing a simulated position",
+          }
+        : {
+            text: "Finding your location…",
+            tone: "pending",
+            announcement: "Finding your location",
+          };
     case "sharing": {
       if (state.problem) {
         return { text: state.problem, tone: "warning", announcement: state.problem };
@@ -139,11 +172,8 @@ function describe(
           ? "sending…"
           : `last sent ${formatElapsed(now - state.lastSentAt)}`;
       // Announce that sharing is on, not every tick of the counter.
-      return {
-        text: `Sharing location · ${sent}`,
-        tone: "active",
-        announcement: "Sharing location",
-      };
+      const what = demo ? "Sharing simulated location" : "Sharing location";
+      return { text: `${what} · ${sent}`, tone: "active", announcement: what };
     }
   }
 }
