@@ -12,6 +12,7 @@ import { shipmentEvents, shipments, type Shipment, type ShipmentEvent } from "@/
 
 import { isDriverInOrganization, NOT_AN_ORGANIZATION_DRIVER } from "./driver-membership";
 import { announceShipmentChange } from "./realtime-signals";
+import { enqueueDriverAssigned } from "./webhook-outbox";
 import {
   forbidden,
   notFound,
@@ -151,6 +152,7 @@ export async function assignDriver(
       .returning();
     // The previous driver hears about it too, so the shipment leaves their app.
     await announceShipmentChange(tx, updated, "assignment", current.assignedDriverId);
+    await enqueueDriverAssigned(tx, updated, event!, metadata);
 
     return { ok: true, shipment: updated, event: event! };
   });

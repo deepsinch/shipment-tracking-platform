@@ -20,6 +20,7 @@ import {
 } from "./results";
 import { announceShipmentChange } from "./realtime-signals";
 import { visibleShipments } from "./shipment-access";
+import { enqueueStatusChanged } from "./webhook-outbox";
 import { blankToUndefined, optionalCoordinate, optionalText } from "./validation";
 
 /** The schema as of `now`, which the future-time check on `occurredAt` compares against. */
@@ -164,6 +165,7 @@ export async function changeShipmentStatus(
       })
       .returning();
     await announceShipmentChange(tx, updated, "status");
+    await enqueueStatusChanged(tx, updated, event!);
 
     return { ok: true, shipment: updated, event: event! };
   });

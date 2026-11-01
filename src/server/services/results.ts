@@ -17,8 +17,21 @@ export type Forbidden = { ok: false; reason: "forbidden" };
 export const notFound: NotFound = { ok: false, reason: "not_found" };
 export const forbidden: Forbidden = { ok: false, reason: "forbidden" };
 
-export function validationFailure(error: z.ZodError): ValidationFailure {
-  return { ok: false, reason: "validation", fieldErrors: fieldErrorsOf(error) };
+/**
+ * `merge` maps a path prefix onto one field, for list inputs whose form shows a single message:
+ * `{ "eventTypes.": "eventTypes" }` reports an invalid third checkbox as `eventTypes`, not
+ * `eventTypes.2`.
+ */
+export function validationFailure(
+  error: z.ZodError,
+  merge: Readonly<Record<string, string>> = {},
+): ValidationFailure {
+  const fieldErrors: FieldErrors = {};
+  for (const [key, messages] of Object.entries(fieldErrorsOf(error))) {
+    const prefix = Object.keys(merge).find((candidate) => key.startsWith(candidate));
+    (fieldErrors[prefix ? merge[prefix]! : key] ??= []).push(...messages);
+  }
+  return { ok: false, reason: "validation", fieldErrors };
 }
 
 /**
