@@ -4,6 +4,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { cache } from "react";
 
+import { DemoLive } from "@/components/demo/demo-live";
 import { LiveRefresh } from "@/components/realtime/live-refresh";
 import { StatusBadge } from "@/components/status-badge";
 import { ShipmentHistory } from "@/components/shipment-history";
@@ -53,6 +54,7 @@ export default async function ShipmentPage({ params }: PageProps<"/dashboard/shi
   return (
     <main className="flex flex-col gap-6">
       <LiveRefresh shipmentId={shipment.id} />
+      <DemoLive />
       <div className="flex flex-col gap-2">
         <Link
           href="/dashboard/shipments"

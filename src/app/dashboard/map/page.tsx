@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 
+import { DemoLive } from "@/components/demo/demo-live";
 import { FleetMap } from "@/components/map/fleet-map";
 import { ShipmentsViewNav } from "@/components/shipments-view-nav";
 import type { FleetShipment } from "@/lib/live-positions";
@@ -44,6 +45,7 @@ export default async function MapPage() {
         </div>
         <ShipmentsViewNav current="map" />
       </div>
+      <DemoLive />
       <FleetMap snapshot={result.positions.map(toFleetShipment)} />
     </main>
   );
