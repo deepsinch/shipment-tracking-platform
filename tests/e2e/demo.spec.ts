@@ -3,6 +3,7 @@ import { randomInt } from "node:crypto";
 import { promisify } from "node:util";
 
 import { expect, test } from "./fixtures";
+import { recordCspViolations } from "./helpers";
 
 /**
  * Demo mode (`DEMO_MODE=true`), served by the second web server of playwright.config.ts (project
@@ -93,7 +94,12 @@ test("the one-click sign-in is rate limited like any other sign-in", async ({ pa
   await expect(page).toHaveURL(/\/sign-in$/);
 });
 
-test("the live map asks the server to move the trucks while it is open", async ({ page }) => {
+test("the live map asks the server to move the trucks while it is open", async ({
+  page,
+  context,
+}) => {
+  // The demo's own parts (banner, buttons, the tick request) live under the same CSP.
+  const violations = await recordCspViolations(context);
   await page.goto("/sign-in");
   await page
     .getByTestId("demo-sign-in")
@@ -112,4 +118,5 @@ test("the live map asks the server to move the trucks while it is open", async (
   const response = await tick;
   expect(response.status()).toBe(200);
   expect(await response.json()).toMatchObject({ ran: true });
+  expect(violations).toEqual([]);
 });
