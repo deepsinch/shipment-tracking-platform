@@ -71,6 +71,9 @@ src/
   shared API code lives in `src/server/api/`. Errors are problem+json from service result kinds; the
   OpenAPI document is tied to routes and projections by tests. API tests give each call a random
   `x-forwarded-for` so per-IP limits do not leak between tests.
+- Outbound integrations (webhooks, later email) are enqueued in the outbox inside the change's own
+  transaction and delivered outside any transaction. Every outbound HTTP request to a user-supplied
+  URL goes through the webhook destination guard (resolve, vet every address, pin the connection).
 - Importing a module must not require environment variables (e.g. the DB pool is created lazily), so
   `next build` works without a database.
 

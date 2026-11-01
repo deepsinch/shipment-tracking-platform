@@ -379,3 +379,31 @@ gets `200`, the other `412`, and one history event is written.
 **Options rejected.** Adding `api` as a member role (it would become assignable in the UI); a
 parallel permission model for keys (two sets of rules that drift). The OpenAPI document is
 hand-written, with tests tying it to the route files and response projections so it cannot drift.
+
+## Webhooks on serverless: no worker, no double delivery, no SSRF
+
+**Problem.** Customers register URLs to hear about shipment changes. Deliveries must never be
+invented (a rolled-back change), lost (a crash mid-send) or duplicated by two concurrent drains, and
+the free hosting plan has no background worker and only a daily cron.
+
+**Approach.**
+
+- An outbox row is written in the same transaction as the change, so a delivery exists only if the
+  change committed.
+- The first attempt runs right after the response via Next's `after()`; retries are drained by app
+  and API activity behind a 30-second global throttle, with the daily cron as a backstop.
+- A drain claims due rows in a short transaction with `FOR UPDATE SKIP LOCKED`, counts the attempt
+  and sets a 2-minute lease, then sends with no transaction open. Concurrent drains skip each other's
+  rows; a crashed drain's row comes back after the lease.
+- Signatures are HMAC-SHA256 over `timestamp.body` with a 5-minute replay window; receivers verify
+  with the snippet in `docs/api.md`.
+
+**SSRF and DNS rebinding.** Checking a URL when it is saved is not enough: the name can later
+resolve to an internal address. At every delivery the host is resolved, every returned address is
+classified (private, loopback, link-local, CGNAT, metadata, including IPv4 embedded in IPv6), and the
+connection is pinned to the vetted address through a custom `lookup`, so there is no second DNS query
+to rebind. Redirects are never followed.
+
+**Options rejected.** One long transaction per batch (holds locks across slow HTTP calls); advisory
+locks (no per-row visibility); a claim `UPDATE` without `SKIP LOCKED` (drains queue on the same rows).
+At scale the outbox feeds a hosted queue instead of activity-driven drains.
