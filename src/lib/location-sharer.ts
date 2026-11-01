@@ -23,7 +23,7 @@ export type SharingState =
   | { mode: "sharing"; lastSentAt: number | null; problem?: string };
 
 export type LocationSharerDeps = {
-  geolocation: Pick<Geolocation, "watchPosition" | "clearWatch">;
+  geolocation: PositionSource;
   send: (fix: Fix) => Promise<SendOutcome>;
   onChange: (state: SharingState) => void;
   /** Called once when the server ends sharing (e.g. the shipment was delivered elsewhere). */
@@ -43,6 +43,48 @@ const WATCH_OPTIONS: PositionOptions = {
   maximumAge: 5_000,
   timeout: 30_000,
 };
+
+/** What a stand-in position source needs: the two methods the sharer calls. */
+export type PositionSource = Pick<Geolocation, "watchPosition" | "clearWatch">;
+
+/**
+ * A position source for the public demo that never touches `navigator.geolocation` (no permission
+ * prompt, no real location read). It only provides the beat: a "position" now and then so the
+ * sharer sends on its usual schedule. The coordinates are placeholders and the demo sender drops
+ * them, so none ever leaves the browser: the server derives a simulated position along the
+ * shipment's route (`recordDriverLocation`).
+ */
+export function createSimulatedPositionSource(options: {
+  /** How often a "position" arrives; at most the sharer's interval, so a send is never late. */
+  beatMs: number;
+  now?: () => number;
+}): PositionSource {
+  const now = options.now ?? Date.now;
+  const timers = new Map<number, ReturnType<typeof setInterval>>();
+  let nextId = 1;
+  return {
+    watchPosition(onSuccess) {
+      const id = nextId++;
+      const beat = () =>
+        onSuccess({
+          coords: { latitude: 0, longitude: 0, accuracy: 0 },
+          timestamp: now(),
+        } as GeolocationPosition);
+      // Asynchronous, like the real thing: the first one straight after the watch is set up.
+      setTimeout(() => {
+        if (!timers.has(id)) return;
+        beat();
+      }, 0);
+      timers.set(id, setInterval(beat, options.beatMs));
+      return id;
+    },
+    clearWatch(id) {
+      const timer = timers.get(id);
+      if (timer !== undefined) clearInterval(timer);
+      timers.delete(id);
+    },
+  };
+}
 
 /**
  * Starts watching and sending; returns `stop`, which ends everything at once (callbacks still in

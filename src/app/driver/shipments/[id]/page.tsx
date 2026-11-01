@@ -16,6 +16,7 @@ import { statusOptionsFor } from "@/domain/shipment-permissions";
 import { formatCountry, formatPlace, formatWeight } from "@/lib/format";
 import { requireAuthContextOn } from "@/server/auth/session";
 import type { Shipment } from "@/server/db/schema";
+import { env } from "@/server/env";
 import { getShipment } from "@/server/services/get-shipment";
 
 import { DueTime } from "../../due-time";
@@ -72,7 +73,8 @@ export default async function DriverShipmentPage({ params }: PageProps<"/driver/
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <LocationSharing key={shipment.id} shipmentId={shipment.id} />
+            {/* Read per request, after the session (which reads headers): one build serves either mode. */}
+            <LocationSharing key={shipment.id} shipmentId={shipment.id} demo={env.demo.enabled} />
           </CardContent>
         </Card>
       )}

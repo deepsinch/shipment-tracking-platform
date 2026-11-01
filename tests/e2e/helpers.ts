@@ -95,14 +95,15 @@ export async function addDriver(adminEmail: string, name: string): Promise<strin
   return email;
 }
 
-/** The shipment's stored latest position, read from the e2e database. */
+/** The shipment's stored latest position, read from the e2e database (or `databaseUrl`'s). */
 export async function readPosition(
   trackingCode: string,
+  databaseUrl = process.env.E2E_DATABASE_URL,
 ): Promise<{ lat: number; lng: number; accuracyM: number } | null> {
   const { stdout } = await promisify(execFile)(
     "pnpm",
     ["exec", "tsx", "--conditions=react-server", "tests/e2e/read-position.ts", trackingCode],
-    { env: { ...process.env, DATABASE_URL: process.env.E2E_DATABASE_URL } },
+    { env: { ...process.env, DATABASE_URL: databaseUrl } },
   );
   return JSON.parse(stdout);
 }
