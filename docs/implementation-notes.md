@@ -1066,6 +1066,16 @@ in `docs/deployment.md`.
   browser's (set to Delhi). Visual check at 390 and 1280 px: the note sits under the description and
   reads fine on one phone screen.
 
+### Live intake evaluation (2026-11-02)
+
+First run of `pnpm intake:eval` against `claude-haiku-5-5` (owner's key): 110/112 fields (98%), and
+it confirmed the adapter's request shape (structured output, `effort: "low"`) is accepted. The
+prompt-injection fixture extracted cleanly; its instructions were ignored. Two misses, both fixed
+in the system prompt (`src/server/intake/prompt.ts`): "same day please" was turned into a delivery
+time (a service level is not a date), and a business name was kept in the pickup address line
+(address lines are now street and house number only). Re-run `pnpm intake:eval` after prompt
+changes; it is the only check against the live model.
+
 ## Known issues / TODOs
 
 - **The CSP allows inline scripts** (decision 40). An injected inline `<script>` would run; the
