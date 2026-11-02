@@ -1,6 +1,6 @@
 import "server-only";
 
-import type { EmailTransportName } from "@/domain/email";
+import { isPermanentEmailFailure, type EmailTransportName } from "@/domain/email";
 
 /**
  * Where a rendered email goes. Two implementations behind one interface (decision 49): Resend for
@@ -21,7 +21,9 @@ export type OutgoingEmail = {
 };
 
 export type SendResult =
-  { kind: "sent"; providerMessageId: string | null } | { kind: "failed"; message: string };
+  | { kind: "sent"; providerMessageId: string | null }
+  /** `permanent`: retrying cannot succeed (see `isPermanentEmailFailure`). */
+  | { kind: "failed"; message: string; permanent?: boolean };
 
 export interface EmailTransport {
   readonly name: EmailTransportName;
@@ -95,6 +97,7 @@ export function createResendTransport(options: ResendOptions): EmailTransport {
       return {
         kind: "failed",
         message: text.length > MAX_ERROR_LENGTH ? `${text.slice(0, MAX_ERROR_LENGTH - 1)}…` : text,
+        permanent: isPermanentEmailFailure(response.status),
       };
     },
   };

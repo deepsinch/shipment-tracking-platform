@@ -286,6 +286,11 @@ published password until you delete them, so for a real deployment start from a 
 
 ## Troubleshooting
 
+- **Customer emails show "failed" with `Resend answered 403: ... domain is not verified`:** `EMAIL_FROM`
+  uses a domain Resend will not send from. Use `Waybill <onboarding@resend.dev>` (delivers only to
+  your Resend account's address) or verify your domain under Resend → Domains. Rejections like this
+  end the message at once instead of retrying; new status changes send new emails once it is fixed.
+
 **The build fails at "validate environment".** The log lists every missing or malformed variable
 at once, naming it (never its value). Fix them under **Settings → Environment Variables**, then
 **Redeploy**. Typical: a variable ticked for Production but not Preview (or the reverse);
