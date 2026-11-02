@@ -163,6 +163,28 @@ describe("email delivery", () => {
     );
   });
 
+  it("ends a message at once when the provider rejects it permanently, without retrying", async () => {
+    const message = await queue();
+    const { transport, sent } = scripted(() => ({
+      kind: "failed",
+      message: "Resend answered 403: The example.resend.app domain is not verified.",
+      permanent: true,
+    }));
+
+    expect(await drainDueEmails(T0, 50, { transport })).toMatchObject({ claimed: 1 });
+    expect(await rowOf(message.id)).toMatchObject({
+      status: "dead",
+      attempts: 1,
+      nextAttemptAt: null,
+      lastError: "Resend answered 403: The example.resend.app domain is not verified.",
+    });
+    // Nothing is due later: no retry on the backoff schedule.
+    expect(await drainDueEmails(after(T0, 24 * 60 * 60 * 1000), 50, { transport })).toMatchObject({
+      claimed: 0,
+    });
+    expect(sent).toHaveLength(1);
+  });
+
   it("succeeds on a later attempt after a failure", async () => {
     const message = await queue();
     const { transport } = scripted((i) =>

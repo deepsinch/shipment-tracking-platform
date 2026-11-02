@@ -92,7 +92,11 @@ describe("Resend transport (against a fake API)", () => {
       apiKey: "re_secret_key",
       baseUrl: api.baseUrl,
     }).send(email);
-    expect(result).toEqual({ kind: "failed", message: "Resend answered 422: Invalid `to` field" });
+    expect(result).toEqual({
+      kind: "failed",
+      message: "Resend answered 422: Invalid `to` field",
+      permanent: true,
+    });
     expect(JSON.stringify(result)).not.toContain("re_secret_key");
   });
 
@@ -103,6 +107,7 @@ describe("Resend transport (against a fake API)", () => {
     expect(await createResendTransport({ apiKey: "k", baseUrl: api.baseUrl }).send(email)).toEqual({
       kind: "failed",
       message: "Resend answered 502",
+      permanent: false,
     });
   });
 

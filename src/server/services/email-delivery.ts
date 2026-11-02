@@ -185,7 +185,10 @@ async function attempt(
     return updated.length > 0 ? "sent" : null;
   }
 
-  const transition = transitionAfterAttempt(message.attempts, false, now);
+  // A rejection that cannot change on retry ends the message now (see `isPermanentEmailFailure`).
+  const transition = sent.permanent
+    ? ({ status: "dead", nextAttemptAt: null } as const)
+    : transitionAfterAttempt(message.attempts, false, now);
   if (transition.status === "succeeded")
     throw new Error("unreachable: a failed attempt cannot succeed");
   const updated = await db

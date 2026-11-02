@@ -6,6 +6,7 @@ import {
   emailDisplayStatus,
   EMAIL_MESSAGE_STATUSES,
   EMAIL_NOTIFY_STATUSES,
+  isPermanentEmailFailure,
   selectEmailTransport,
   shouldEmailForStatus,
 } from "./email";
@@ -70,5 +71,19 @@ describe("permissions", () => {
     expect(
       ["admin", "dispatcher", "driver", "api"].map((r) => canViewEmailPreviews(r as never)),
     ).toEqual([true, false, false, false]);
+  });
+});
+
+describe("isPermanentEmailFailure", () => {
+  it("treats rejected requests as permanent", () => {
+    for (const status of [400, 401, 403, 404, 405, 422]) {
+      expect(isPermanentEmailFailure(status)).toBe(true);
+    }
+  });
+
+  it("retries timeouts, conflicts, rate limits and server errors", () => {
+    for (const status of [408, 409, 429, 500, 502, 503]) {
+      expect(isPermanentEmailFailure(status)).toBe(false);
+    }
   });
 });
