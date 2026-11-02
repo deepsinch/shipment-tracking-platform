@@ -195,6 +195,8 @@ Next 16.4.3, React 19.3.0, TypeScript 5.9.3, Tailwind CSS 4.3.3 (via `@tailwindc
 ESLint 9 + eslint-config-next 16.4.3, Prettier 3.9, Vitest 5.0.5 (Vite 8), better-auth 1.7.14,
 drizzle-orm 0.45.4, drizzle-kit 0.31.11, pg 8.23, zod 4.6.7, @playwright/test 1.64.1, tsx 4.23.
 
+- Own-write window: the realtime echo of a submit from this tab arrives before the Server Action's revalidated page remounts the (version-keyed) form, which still holds the submitted values. `LiveRefresh` therefore treats a guarded form's `submit` as an own write: realtime requests are queued (never a notice) until the form leaves the DOM plus a 3 s grace (10 s cap if it never remounts), and a MutationObserver re-checks a shown notice so it clears when the form becomes clean. React cancels the native submit of action forms, so do not test `defaultPrevented` on it. `tests/e2e/own-submit.spec.ts` guards this.
+
 ### Library gotchas
 
 - **Next 16 is newer than most training data.** It ships its own docs in
