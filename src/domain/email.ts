@@ -88,3 +88,14 @@ export function selectEmailTransport(config: {
   if (config.demoMode) return "preview";
   return config.resendApiKey && config.from ? "resend" : "preview";
 }
+
+/**
+ * Whether a provider's HTTP answer means retrying cannot help. A rejected request (bad input, an
+ * unverified sender domain, a bad or revoked key) fails the same way on every retry, so the message
+ * ends as dead at once instead of burning the backoff schedule. Timeouts, conflicts, rate limits and
+ * server errors are retried. Fixing the configuration sends the next emails; messages that already
+ * failed keep their reason on the shipment page.
+ */
+export function isPermanentEmailFailure(httpStatus: number): boolean {
+  return [400, 401, 403, 404, 405, 422].includes(httpStatus);
+}
