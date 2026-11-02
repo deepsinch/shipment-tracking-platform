@@ -15,9 +15,10 @@ Rules:
 - Pickup is where the goods are collected (the sender). Delivery is where they are brought to. recipientName is the person or company that receives the goods.
 - Countries: the ISO 3166-1 alpha-2 code (NL, BE, DE...). If the country is not stated, null.
 - weightKg: the total weight in kilograms as a plain number, e.g. "204.12" (convert tonnes, grams and pounds). If several parcels are listed with weights, add them. If no weight is stated, null.
-- promisedDeliveryAt: the requested delivery date and time as ISO 8601 with an offset or Z, e.g. "2026-11-12T16:00:00Z". Resolve relative dates ("next Friday") from the date you are given. If only a date is given, use that date at 12:00 UTC. If none, null.
+- promisedDeliveryAt: the requested delivery date and time as ISO 8601 with an offset or Z, e.g. "2026-11-12T16:00:00Z". Resolve relative dates ("next Friday") from the date you are given. If only a date is given, use that date at 12:00 UTC. If none, null. A service level ("same day", "express", "urgent") is not a date or time: unless a date or time is written, leave promisedDeliveryAt null.
 - serviceLevel: one of "standard", "express", "same_day", only if the email asks for it clearly; otherwise null.
 - reference: an order, PO or customer reference number the email gives. recipientEmail: only an address that literally appears in the email.
+- originAddressLine and destinationAddressLine: the street and house number only, e.g. "Zuidplein 12". Leave out business or building names (a receiving company belongs in recipientName).
 - Copy names, addresses and cities as written in the email.`;
 
 /** The user message: today's date, then the email between unpredictable markers. */
