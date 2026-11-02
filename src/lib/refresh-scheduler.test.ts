@@ -84,6 +84,71 @@ describe("createRefreshScheduler", () => {
     expect(deferrals).toEqual([true, false]);
   });
 
+  it("shows no notice for the echo of the user's own submit, even while the form holds the submitted values", () => {
+    blocked = true; // the form still holds what was just submitted
+    scheduler.submitStarted();
+    scheduler.request(); // own write's shipment_changed
+    vi.advanceTimersByTime(300);
+    expect(deferrals).toEqual([]);
+
+    blocked = false; // the form remounted clean
+    scheduler.submitSettled();
+    vi.advanceTimersByTime(3_000);
+    expect(deferrals).toEqual([]);
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("covers an event arriving shortly after the submission settled, with at most one refresh", () => {
+    scheduler.submitStarted();
+    scheduler.submitSettled();
+    vi.advanceTimersByTime(1_000);
+    for (let i = 0; i < 5; i++) scheduler.request();
+    vi.advanceTimersByTime(300);
+    expect(refresh).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(2_000);
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(deferrals).toEqual([]);
+  });
+
+  it("settles a submission that never remounts after the safety cap", () => {
+    scheduler.submitStarted();
+    scheduler.request();
+    vi.advanceTimersByTime(10_000 + 3_000);
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows the notice when another user's change arrives while the user is typing", () => {
+    blocked = true;
+    scheduler.request();
+    vi.advanceTimersByTime(300);
+    expect(deferrals).toEqual([true]);
+  });
+
+  it("shows the notice after the window if genuinely edited input still blocks", () => {
+    scheduler.submitStarted();
+    scheduler.request();
+    scheduler.submitSettled();
+    blocked = true; // the user typed in the fresh form meanwhile
+    vi.advanceTimersByTime(3_000);
+    expect(refresh).not.toHaveBeenCalled();
+    expect(deferrals).toEqual([true]);
+  });
+
+  it("clears the notice when the form becomes clean without typing", () => {
+    blocked = true;
+    scheduler.request();
+    vi.advanceTimersByTime(300);
+    expect(deferrals).toEqual([true]);
+
+    scheduler.recheck();
+    expect(deferrals).toEqual([true]);
+
+    blocked = false; // form remounted
+    scheduler.recheck();
+    expect(deferrals).toEqual([true, false]);
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
   it("cancels a pending refresh when disposed", () => {
     scheduler.request();
     scheduler.dispose();

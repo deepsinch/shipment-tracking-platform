@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import type { RealtimeClientEvent } from "@/lib/realtime-events";
 import { createRefreshScheduler, type RefreshScheduler } from "@/lib/refresh-scheduler";
-import { hasUnsavedInput } from "@/lib/unsaved-input";
+import { hasUnsavedInput, UNSAVED_GUARD_ATTRIBUTE } from "@/lib/unsaved-input";
 
 import { useRealtime } from "./realtime-provider";
 
@@ -53,7 +53,28 @@ export function LiveRefresh({
     if (wasHidden.current) scheduler.request();
 
     const release = () => scheduler.release();
-    const dismiss = () => scheduler.dismiss();
+
+    // Own submissions: the Server Action revalidates the page itself, so the realtime echo of our
+    // own write must not raise the notice. A guarded form is keyed by `version`, so it is removed
+    // from the document when the revalidated page arrives: that is the settle signal (a
+    // `pending` flag lives inside each form's component and is not visible from here).
+    let submitted: HTMLFormElement | null = null;
+    const dismiss = (event: Event) => {
+      scheduler.dismiss();
+      const form = event.target instanceof HTMLFormElement ? event.target : null;
+      // (Not checking `defaultPrevented`: React cancels the native submit of every action form.)
+      if (!form?.hasAttribute(UNSAVED_GUARD_ATTRIBUTE)) return;
+      submitted = form;
+      scheduler.submitStarted();
+    };
+    const observer = new MutationObserver(() => {
+      if (submitted && !submitted.isConnected) {
+        submitted = null;
+        scheduler.submitSettled();
+      }
+      scheduler.recheck();
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
     document.addEventListener("input", release);
     document.addEventListener("reset", release);
     document.addEventListener("submit", dismiss);
@@ -63,6 +84,7 @@ export function LiveRefresh({
       document.removeEventListener("input", release);
       document.removeEventListener("reset", release);
       document.removeEventListener("submit", dismiss);
+      observer.disconnect();
       scheduler.dispose();
       schedulerRef.current = null;
       setDeferred(false);
