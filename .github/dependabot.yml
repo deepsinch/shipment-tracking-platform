@@ -1,0 +1,12 @@
+# Weekly pull requests for new releases of the GitHub Actions used in CI (bumping the pinned commit
+# hashes and their version comments). npm dependencies are deliberately not listed: package.json is
+# pinned to exact versions and upgraded by hand (see CLAUDE.md). Dependabot alerts still report
+# vulnerable packages.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci
