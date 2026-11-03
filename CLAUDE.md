@@ -155,8 +155,9 @@ src/
   Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
   ```
   No `Claude-Session` line and no session links in commits or PR descriptions (owner's decision: the
-  repo is public and those links only open for the owner). Earlier commits keep theirs; pushed
-  history is never rewritten.
+  repo is public and those links only open for the owner). The owner had `main` rewritten once to
+  remove earlier ones; that was a one-off owner decision, and pushed history is otherwise never
+  rewritten.
 - Never commit `.env` or secrets. Never rewrite pushed history. The implementor never changes git config.
 
 ## Environment
