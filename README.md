@@ -154,10 +154,20 @@ CHROME_PATH=/path/to/chromium pnpm exec lighthouse http://localhost:3000/ \
 
 ## Local setup
 
-Prerequisites: Node 22, pnpm 10, PostgreSQL 16.
+Prerequisites: Node 22, PostgreSQL 16, and pnpm 10 (`corepack enable` provides the version pinned in
+`package.json`).
 
-1. `pnpm install`
-2. Create the role and databases (as the `postgres` superuser):
+1. Clone and install:
+
+   ```bash
+   git clone https://github.com/deepsinch/shipment-tracking-platform.git
+   cd shipment-tracking-platform
+   corepack enable
+   pnpm install
+   ```
+
+2. Create the database role and databases (as the `postgres` superuser, e.g. `sudo -u postgres psql`
+   on Linux or `psql postgres` with Homebrew on macOS):
 
    ```sql
    CREATE ROLE waybill WITH LOGIN PASSWORD 'waybill' CREATEDB;
@@ -165,13 +175,36 @@ Prerequisites: Node 22, pnpm 10, PostgreSQL 16.
    CREATE DATABASE waybill_test OWNER waybill;
    ```
 
-   The e2e databases are created automatically by `pnpm test:e2e`.
+   The end-to-end databases are created automatically by `pnpm test:e2e`.
 
-3. `cp .env.example .env`, then set `BETTER_AUTH_SECRET` (`openssl rand -base64 32`).
-4. `pnpm db:migrate && pnpm db:seed`, then `pnpm dev` and open http://localhost:3000
+3. Configure: `cp .env.example .env`, then set `BETTER_AUTH_SECRET` to the output of
+   `openssl rand -base64 32`. The database URLs in `.env.example` already match the role above.
+4. Create the schema and demo data, then start the app:
 
-Sign in with the demo accounts above. Deploying: [docs/deployment.md](docs/deployment.md). Using the
-API: [docs/api.md](docs/api.md).
+   ```bash
+   pnpm db:migrate
+   pnpm db:seed
+   pnpm dev
+   ```
+
+   Open http://localhost:3000 and sign in with the demo accounts above.
+
+**Run the checks** (the same ones CI runs):
+
+```bash
+pnpm format:check && pnpm lint && pnpm typecheck
+pnpm test            # unit + integration tests (needs Postgres and .env)
+pnpm exec playwright install chromium   # once per machine, for the end-to-end tests
+pnpm test:e2e        # builds the app and runs Playwright against a fresh database
+```
+
+**Optional integrations** are off by default and the app works without them: customer emails go to
+a stored preview, photo capture and AI intake are hidden. To turn them on locally, add
+`RESEND_API_KEY` + `EMAIL_FROM`, `BLOB_READ_WRITE_TOKEN` or `ANTHROPIC_API_KEY` to `.env` (see
+[docs/deployment.md](docs/deployment.md)). With an Anthropic key, `pnpm intake:eval` scores the AI
+intake on its test emails.
+
+Deploying: [docs/deployment.md](docs/deployment.md). Using the API: [docs/api.md](docs/api.md).
 
 ### Try the live demo locally
 
