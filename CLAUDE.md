@@ -90,6 +90,9 @@ src/
 - Dependencies are pinned to exact versions in `package.json` (no `^` or `~`); `.npmrc` sets
   `save-exact=true`, so `pnpm add` pins automatically. Upgrades are deliberate: bump the exact version,
   run every check, commit the lockfile with it.
+- GitHub Actions in workflows are pinned to full commit hashes with the release in a comment
+  (`uses: owner/action@<sha> # vX.Y.Z`), never to a tag. Dependabot (`.github/dependabot.yml`) opens
+  weekly PRs for action updates only; npm is deliberately not in that config.
 
 ## Quality bar
 
