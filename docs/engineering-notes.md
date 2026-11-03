@@ -468,3 +468,8 @@ review is the final control, and a test states that limit explicitly.
 **Evaluation.** Eight fixtures (English, German, French, one prompt injection, one with missing
 fields) run through the validation layer in CI with recorded answers; `pnpm intake:eval` measures
 field-level accuracy against the live model when a key is configured.
+
+**Measure, fix, re-measure.** The first live run scored 110/112: the model turned "same day please"
+into a delivery time and kept a shop name in the pickup address. Both traced to underspecified rules
+in the prompt (a service level is not a date; address lines are street and number only). After
+tightening them, the re-run scored 112/112.

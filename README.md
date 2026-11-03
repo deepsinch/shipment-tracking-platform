@@ -136,6 +136,7 @@ Deployed on Vercel and Neon, with GitHub Actions CI.
 | Integration tests     | 435 (40 files) (real PostgreSQL)                                            |
 | End-to-end tests      | 41 tests (Playwright, production build, includes an axe accessibility spec) |
 | Coverage              | 88% lines, 84% branches (`pnpm test:coverage`, source files, UI excluded)   |
+| AI intake accuracy    | 112/112 fields on 8 fixtures (EN/DE/FR, prompt injection), Claude Haiku 5.5 |
 | Lighthouse (landing)  | 96 / 100 / 100 / 100 (performance, accessibility, best practices, SEO)      |
 | Lighthouse (sign-in)  | 100 / 100 / 100 / 63 (noindex)                                              |
 | Lighthouse (tracking) | 93 / 100 / 100 / 54 (noindex)                                               |

@@ -1078,6 +1078,8 @@ time (a service level is not a date), and a business name was kept in the pickup
 (address lines are now street and house number only). Re-run `pnpm intake:eval` after prompt
 changes; it is the only check against the live model.
 
+Re-run after the prompt fix (2026-11-03): **112/112 fields (100%)**.
+
 ## Known issues / TODOs
 
 - **The CSP allows inline scripts** (decision 40). An injected inline `<script>` would run; the
