@@ -143,12 +143,14 @@ src/
   git config committer.email "noreply@anthropic.com"
   ```
   Check with `git log -1 --format='%an <%ae> / %cn <%ce> / sig:%G?'` after the first commit.
-- Every commit message ends with these two trailer lines. Name the model that actually wrote the commit
-  (the implementor's model for its commits, e.g. `Claude Sonnet 5.5`), and use the current session URL:
+- Every commit message ends with one trailer line naming the model that actually wrote the commit
+  (the implementor's model for its commits, e.g. `Claude Sonnet 5.5`):
   ```
   Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
-  Claude-Session: https://claude.ai/code/<current session id>
   ```
+  No `Claude-Session` line and no session links in commits or PR descriptions (owner's decision: the
+  repo is public and those links only open for the owner). Earlier commits keep theirs; pushed
+  history is never rewritten.
 - Never commit `.env` or secrets. Never rewrite pushed history. The implementor never changes git config.
 
 ## Environment
