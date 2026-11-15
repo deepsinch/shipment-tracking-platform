@@ -13,6 +13,11 @@ import { expect, type BrowserContext, type Page } from "@playwright/test";
 
 const PASSWORD = "correct-horse-battery";
 
+/** A random address from TEST-NET-3, so each test's rate-limit counters are its own. */
+function randomClientIp(): string {
+  return `203.0.113.${randomInt(1, 255)}`;
+}
+
 /**
  * Signs up a new user, who becomes the admin of a new company, and lands on the shipment list.
  * Returns their email.
@@ -24,8 +29,7 @@ const PASSWORD = "correct-horse-battery";
  */
 export async function signUp(page: Page, name = "Erin Dispatcher"): Promise<string> {
   const email = `e2e-${randomUUID()}@example.test`;
-  const clientIp = `203.0.113.${randomInt(1, 255)}`;
-  await page.context().setExtraHTTPHeaders({ "x-forwarded-for": clientIp });
+  await page.context().setExtraHTTPHeaders({ "x-forwarded-for": randomClientIp() });
   await page.goto("/sign-up");
   await page.getByLabel("Your name", { exact: true }).fill(name);
   await page.getByLabel("Email", { exact: true }).fill(email);
@@ -64,6 +68,10 @@ export async function expectNotReloaded(page: Page): Promise<void> {
 
 /** Signs in with the shared e2e password; where the user lands depends on their role. */
 export async function signIn(page: Page, email: string): Promise<void> {
+  // Like signUp: a context of its own would otherwise sign in from the machine's real address,
+  // and the suite's sign-ins together (a few per spec, more with --repeat-each) would pass the
+  // per-IP limit of 30 per 15 minutes, failing later specs with a "too many attempts" page.
+  await page.context().setExtraHTTPHeaders({ "x-forwarded-for": randomClientIp() });
   await page.goto("/sign-in");
   await page.getByLabel("Email", { exact: true }).fill(email);
   await page.getByLabel("Password", { exact: true }).fill(PASSWORD);
