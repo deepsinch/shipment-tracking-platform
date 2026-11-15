@@ -68,5 +68,11 @@
   "packageManager": "pnpm@10.28.0",
   "engines": {
     "node": ">=22"
-  }
+  },
+  "browserslist": [
+    "chrome 111",
+    "edge 111",
+    "firefox 113",
+    "safari 16.4"
+  ]
 }
