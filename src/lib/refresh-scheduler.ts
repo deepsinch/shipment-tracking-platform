@@ -1,6 +1,13 @@
+/** `change`: something is known to have changed. `resync`: the stream (re)connected; maybe not. */
+export type RequestKind = "change" | "resync";
+
 export type RefreshScheduler = {
-  /** Something changed: refresh soon. Requests within the debounce window share one refresh. */
-  request(): void;
+  /**
+   * Something changed: refresh soon. Requests within the debounce window share one refresh.
+   * `"resync"` means a (re)connection, which says the page may be stale, not that it is: the
+   * refresh still runs, but it never raises the notice (see `createRefreshScheduler`).
+   */
+  request(kind?: RequestKind): void;
   /** The user may have stopped editing (input cleared, form reset): run a deferred refresh. */
   release(): void;
   /** The user submitted: their action re-renders the page, so drop the deferred refresh. */
@@ -40,6 +47,12 @@ export type RefreshSchedulerOptions = {
  * - When the window ends while the user has unsaved input (`isBlocked`), the refresh is deferred
  *   instead: a refresh would remount the version-keyed forms and wipe what they typed. The page
  *   shows a notice; the refresh runs once the input is gone, or when the user asks for it.
+ * - Only a `change` raises that notice. A `resync` (every connection of the stream starts with
+ *   one, including the page's first, a few hundred milliseconds after load) is not evidence that
+ *   anything changed: when input blocks a refresh requested by resyncs alone, it waits silently
+ *   and runs when the input is gone. Raising the notice there told users about updates that did
+ *   not exist, and flaked `own-submit.spec.ts` whenever the first field was touched right after
+ *   a page load.
  */
 export function createRefreshScheduler({
   refresh,
@@ -56,6 +69,10 @@ export function createRefreshScheduler({
   let capTimer: ReturnType<typeof setTimeout> | undefined;
   /** A request arrived during the own-write window; at most one refresh is queued for its end. */
   let queued = false;
+  /** A `change` (not just a `resync`) is part of the refresh being collected or deferred. */
+  let changeSeen = false;
+  /** Input blocked a refresh that only resyncs asked for: it runs when the input is gone. */
+  let quietlyDeferred = false;
 
   const setDeferred = (next: boolean) => {
     if (next === deferred) return;
@@ -65,12 +82,31 @@ export function createRefreshScheduler({
 
   const ownWindowOpen = () => inFlight || graceTimer !== undefined;
 
+  /** The collected requests are due: refresh, or wait for the input that blocks it. */
+  const run = () => {
+    if (isBlocked()) {
+      if (changeSeen) setDeferred(true);
+      else quietlyDeferred = true;
+      return;
+    }
+    changeSeen = false;
+    quietlyDeferred = false;
+    refresh();
+  };
+
+  /** The input that blocked a deferred refresh is gone: end the deferral and refresh. */
+  const settleDeferral = () => {
+    changeSeen = false;
+    quietlyDeferred = false;
+    setDeferred(false);
+    refresh();
+  };
+
   const endWindow = () => {
     graceTimer = undefined;
     if (!queued) return;
     queued = false;
-    if (isBlocked()) setDeferred(true);
-    else refresh();
+    run();
   };
 
   const fire = () => {
@@ -79,12 +115,16 @@ export function createRefreshScheduler({
       queued = true;
       return;
     }
-    if (isBlocked()) setDeferred(true);
-    else refresh();
+    run();
   };
 
   return {
-    request() {
+    request(kind = "change") {
+      if (kind === "change") {
+        // A change turns a quiet wait into a regular request: the notice, if input still blocks.
+        changeSeen = true;
+        quietlyDeferred = false;
+      }
       if (ownWindowOpen()) {
         queued = true;
         return;
@@ -92,11 +132,12 @@ export function createRefreshScheduler({
       timer ??= setTimeout(fire, debounceMs);
     },
     release() {
-      if (!deferred || isBlocked()) return;
-      setDeferred(false);
-      refresh();
+      if (!(deferred || quietlyDeferred) || isBlocked()) return;
+      settleDeferral();
     },
     dismiss() {
+      quietlyDeferred = false;
+      changeSeen = false;
       setDeferred(false);
     },
     submitStarted() {
@@ -115,13 +156,12 @@ export function createRefreshScheduler({
       graceTimer = setTimeout(endWindow, graceMs);
     },
     recheck() {
-      if (deferred && !isBlocked()) {
-        setDeferred(false);
-        refresh();
-      }
+      if ((deferred || quietlyDeferred) && !isBlocked()) settleDeferral();
     },
     refreshNow() {
       queued = false;
+      changeSeen = false;
+      quietlyDeferred = false;
       clearTimeout(timer);
       timer = undefined;
       setDeferred(false);

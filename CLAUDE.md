@@ -70,8 +70,8 @@ src/
   spec fails on violations. `dangerouslySetInnerHTML` is banned by lint (part of the CSP tradeoff).
 - Public API: route files under `src/app/api/v1` export handlers only, built with `apiRoute(scope, ...)`;
   shared API code lives in `src/server/api/`. Errors are problem+json from service result kinds; the
-  OpenAPI document is tied to routes and projections by tests. API tests give each call a random
-  `x-forwarded-for` so per-IP limits do not leak between tests.
+  OpenAPI document is tied to routes and projections by tests. API tests, and every e2e sign-in or sign-up
+  helper, give each client a random `x-forwarded-for` so per-IP rate limits do not leak between tests.
 - Outbound integrations (webhooks, later email) are enqueued in the outbox inside the change's own
   transaction and delivered outside any transaction. Every outbound HTTP request to a user-supplied
   URL goes through the webhook destination guard (resolve, vet every address, pin the connection).
@@ -97,6 +97,10 @@ src/
 ## Quality bar
 
 - Never skip, weaken or delete a test to make it pass. Fix the code, or report the problem.
+- A flaky test (fails, then passes on re-run with no change) is fixed at its root cause straight
+  away, without asking the owner: reproduce it with `--repeat-each`, decide whether the race is in
+  the product or the test, fix that, and prove it with a high repeat count. Re-running CI is only
+  for confirming a flake, never the fix.
 - For critical guarantees (triggers, constraints, authorization), prove the test can fail (temporarily
   break the code, see it go red, restore).
 - Concurrency guarantees (conditional updates, throttles, limits) are proven with a forced race:

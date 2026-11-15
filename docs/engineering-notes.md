@@ -473,3 +473,25 @@ field-level accuracy against the live model when a key is configured.
 into a delivery time and kept a shop name in the pickup address. Both traced to underspecified rules
 in the prompt (a service level is not a date; address lines are street and number only). After
 tightening them, the re-run scored 112/112.
+
+## A flaky test that was a real bug
+
+**Problem.** One end-to-end test failed about one run in four and passed on re-run. Re-running CI made
+it go away, which is exactly how flaky tests hide product bugs.
+
+**Approach.** Reproduce first: `--repeat-each=30` failed 8 times. Timestamped logs of the refresh
+scheduler showed the cause was not the suspected late echo of the user's own change, but the
+`resync` every live connection sends on (re)connect. If the user touched a form in the ~300 ms
+before that refresh fired, they saw "this shipment was updated while you were editing" when nothing
+had changed. That happens to real users on every page load and every routine reconnect, not just in
+tests.
+
+**Fix.** Distinguish "maybe stale" from "known changed": a `resync` blocked by unsaved input now
+waits silently and refreshes once the input is gone; only an actual change event can show the
+notice. Unit tests cover both paths (three fail against the old scheduler). The repeat run then
+exposed a second, latent flake: end-to-end sign-ins shared one client address and tripped the real
+sign-in rate limit, fixed by giving each test client its own address. Final result: 50 of 50 runs
+pass.
+
+**Lesson.** A flaky test is a bug report with bad reproduction steps. Reproduce it under repetition,
+instrument the timing, and fix whichever side has the race: here it was the product.

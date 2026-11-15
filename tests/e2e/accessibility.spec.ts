@@ -10,6 +10,10 @@ import type { Page } from "@playwright/test";
  * elements, so a failure is actionable without opening a report.
  */
 async function expectAccessible(page: Page): Promise<void> {
+  // Next streams a dynamic page's metadata after its body, so the heading can be visible a moment
+  // before `<title>` exists; axe would report "document-title" for a page that is about to have one.
+  // A page that never gets a title still fails, here instead of in axe.
+  await expect(page).toHaveTitle(/\S/);
   const { violations } = await new AxeBuilder({ page })
     .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "best-practice"])
     .analyze();
