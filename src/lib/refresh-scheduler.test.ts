@@ -149,6 +149,65 @@ describe("createRefreshScheduler", () => {
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 
+  it("never shows the notice for a resync alone: it waits for the input to go, then refreshes", () => {
+    blocked = true;
+    scheduler.request("resync"); // the stream's first resync, right after page load
+    vi.advanceTimersByTime(300);
+    expect(deferrals).toEqual([]);
+    expect(refresh).not.toHaveBeenCalled();
+
+    scheduler.recheck();
+    expect(refresh).not.toHaveBeenCalled(); // still typing
+
+    blocked = false;
+    scheduler.recheck();
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(deferrals).toEqual([]);
+  });
+
+  it("refreshes a resync immediately when nothing blocks it", () => {
+    scheduler.request("resync");
+    vi.advanceTimersByTime(300);
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("drops a quiet wait on submit: the action's own revalidation is fresher", () => {
+    blocked = true;
+    scheduler.request("resync");
+    vi.advanceTimersByTime(300);
+    scheduler.dismiss();
+    blocked = false;
+    scheduler.recheck();
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it("shows the notice when a real change joins or follows a resync", () => {
+    blocked = true;
+    scheduler.request("resync");
+    scheduler.request("change");
+    vi.advanceTimersByTime(300);
+    expect(deferrals).toEqual([true]);
+
+    scheduler.dismiss();
+    scheduler.request("resync");
+    vi.advanceTimersByTime(300);
+    expect(deferrals).toEqual([true, false]); // quiet again: no new notice
+
+    scheduler.request("change"); // a change after a quiet wait
+    vi.advanceTimersByTime(300);
+    expect(deferrals).toEqual([true, false, true]);
+  });
+
+  it("does not show the notice for a resync queued during an own submission", () => {
+    scheduler.submitStarted();
+    scheduler.request("resync");
+    scheduler.submitSettled();
+    blocked = true; // the user already typed in the fresh form
+    vi.advanceTimersByTime(3_000);
+    expect(deferrals).toEqual([]);
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
   it("cancels a pending refresh when disposed", () => {
     scheduler.request();
     scheduler.dispose();

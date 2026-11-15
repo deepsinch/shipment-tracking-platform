@@ -92,8 +92,13 @@ export function LiveRefresh({
   }, [router]);
 
   useRealtime((event: RealtimeClientEvent) => {
+    // A resync only says the page may be stale (the stream's first one arrives right after every
+    // page load), so it never raises the "updated while you were editing" notice.
+    if (event.kind === "resync") {
+      schedulerRef.current?.request("resync");
+      return;
+    }
     const relevant =
-      event.kind === "resync" ||
       (event.kind === "shipment_changed" && (!shipmentId || event.shipmentId === shipmentId)) ||
       alsoOn?.(event) === true;
     if (relevant) schedulerRef.current?.request();
